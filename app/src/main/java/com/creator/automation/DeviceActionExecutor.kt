@@ -6,7 +6,8 @@ import android.util.Log
 class DeviceActionExecutor(
     private val context: Context,
     private val actionResolver: ActionResolver = ActionResolver(),
-    private val auditDao: ActionAuditDao = AppDatabase.getDatabase(context).actionAuditDao()
+    private val auditDao: ActionAuditDao = AppDatabase.getDatabase(context).actionAuditDao(),
+    private val waitEngine: WaitEngine = WaitEngine(actionResolver)
 ) {
 
     companion object {
@@ -27,7 +28,8 @@ class DeviceActionExecutor(
         action: AutomationAction,
         service: AutomationAccessibilityService,
         trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
-        verificationAction: AutomationAction? = null
+        verificationAction: AutomationAction? = null,
+        screenObservationProvider: ObservationProvider? = null
     ): ActionResult {
         val startTime = System.currentTimeMillis()
 
@@ -38,9 +40,38 @@ class DeviceActionExecutor(
 
         val redactedTarget = redactSensitiveText(action.targetValue)
 
-        Log.i(TAG, "EXECUTING_ACTION: Type=${action.type}, Target='$redactedTarget', Pkg='${beforeSnapshot.packageName}'")
+        Log.i(TAG, "EXECUTING_ACTION: Type=${action.type}, Target='$redactedTarget', Semantics=${action.semantics}, Pkg='${beforeSnapshot.packageName}'")
 
-        // 2. Dispatch Action via Accessibility Engine
+        // 2. Check Action Preconditions
+        val preconditionResult = checkPreconditions(action.preconditions, beforeSnapshot)
+        if (!preconditionResult.success) {
+            Log.w(TAG, "PRECONDITION_FAILED: ${preconditionResult.failureReason}")
+            val auditRecord = ActionAuditRecord(
+                timestamp = System.currentTimeMillis(),
+                workflowId = workflowId,
+                trigger = trigger.name,
+                activePackage = beforeSnapshot.packageName,
+                beforeStateSignature = beforeStateSig,
+                actionType = action.type.name,
+                targetIdentifier = redactedTarget,
+                actionParametersSummary = "Semantics=${action.semantics}, Preconditions=${action.preconditions.size}",
+                reason = ExecutionReason.PRECONDITION_FAILED.name,
+                dispatchResult = ActionResultStatus.FAILED.name,
+                verificationStatus = VerificationStatus.FAILED.name,
+                success = false,
+                failureReason = preconditionResult.failureReason
+            )
+            auditDao.insertAuditRecord(auditRecord)
+            return ActionResult(
+                status = ActionResultStatus.FAILED,
+                reason = ExecutionReason.PRECONDITION_FAILED,
+                trigger = trigger,
+                message = preconditionResult.failureReason,
+                snapshot = beforeSnapshot
+            )
+        }
+
+        // 3. Dispatch Action via Accessibility Engine
         val dispatchResult = when (action.type) {
             ActionType.OPEN_URL -> performOpenUrl(action.targetValue)
             ActionType.CHECK_AUTH_STATE -> performAuthCheck(beforeSnapshot)
@@ -54,16 +85,29 @@ class DeviceActionExecutor(
             else -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
         }
 
+        // 4. Evaluate WaitCondition if attached to action
+        if (dispatchResult.status == ActionResultStatus.SUCCESS && action.waitCondition != null) {
+            val waitRes = waitEngine.waitUntil(
+                condition = action.waitCondition,
+                service = service,
+                screenProvider = screenObservationProvider,
+                initialSignature = beforeStateSig
+            )
+            if (!waitRes.success) {
+                Log.w(TAG, "ACTION_WAIT_CONDITION_FAILED: ${waitRes.failureReason}")
+            }
+        }
+
         val durationMs = System.currentTimeMillis() - startTime
 
-        // 3. Capture After State & Compare
+        // 5. Capture After State & Compare
         val afterRoot = service.getRootNode()
         val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
         val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
 
         val stateChange = compareStates(beforeStateSig, afterStateSig, verificationAction != null)
 
-        // 4. Verify Result
+        // 6. Verify Result
         val verificationStatus = if (dispatchResult.status == ActionResultStatus.SUCCESS) {
             if (verificationAction != null) {
                 val verifyRes = performWaitForText(verificationAction.targetValue, verificationAction.timeoutMs, service)
@@ -77,7 +121,7 @@ class DeviceActionExecutor(
 
         val isOverallSuccess = dispatchResult.status == ActionResultStatus.SUCCESS && verificationStatus != VerificationStatus.FAILED
 
-        // 5. Persist Audit Record
+        // 7. Persist Audit Record
         val auditRecord = ActionAuditRecord(
             timestamp = System.currentTimeMillis(),
             workflowId = workflowId,
@@ -86,7 +130,7 @@ class DeviceActionExecutor(
             beforeStateSignature = beforeStateSig,
             actionType = action.type.name,
             targetIdentifier = redactedTarget,
-            actionParametersSummary = "Type=${action.type}, Timeout=${action.timeoutMs}ms",
+            actionParametersSummary = "Type=${action.type}, Timeout=${action.timeoutMs}ms, Semantics=${action.semantics}",
             dispatchResult = dispatchResult.status.name,
             afterStateSignature = afterStateSig,
             stateChangeResult = stateChange.name,
@@ -107,6 +151,31 @@ class DeviceActionExecutor(
             snapshot = afterSnapshot,
             message = if (!isOverallSuccess) dispatchResult.message ?: "Verification failed" else dispatchResult.message
         )
+    }
+
+    fun checkPreconditions(
+        preconditions: List<ActionPrecondition>,
+        snapshot: UiSnapshot
+    ): PreconditionCheckResult {
+        for (pre in preconditions) {
+            val expected = pre.expectedValue ?: ""
+            val satisfied = when (pre.type) {
+                PreconditionType.PACKAGE_MATCH -> snapshot.packageName.equals(expected, ignoreCase = true)
+                PreconditionType.TEXT_PRESENT -> snapshot.visibleTexts.any { it.contains(expected, ignoreCase = true) }
+                PreconditionType.VIEW_ID_PRESENT -> snapshot.viewIds.any { it.endsWith(expected, ignoreCase = true) }
+                PreconditionType.EDITABLE_PRESENT -> snapshot.allNodes.any { it.className?.contains("EditText", ignoreCase = true) == true }
+                PreconditionType.SCROLLABLE_PRESENT -> snapshot.scrollableNodes.isNotEmpty()
+                PreconditionType.AUTH_AUTHENTICATED -> actionResolver.detectAuthState(snapshot) == AuthState.AUTHENTICATED
+            }
+
+            if (!satisfied) {
+                return PreconditionCheckResult(
+                    success = false,
+                    failureReason = "Precondition '${pre.type}' unsatisfied on package '${snapshot.packageName}' (Expected '$expected')"
+                )
+            }
+        }
+        return PreconditionCheckResult(success = true)
     }
 
     fun compareStates(beforeSig: String, afterSig: String, isVerificationExpected: Boolean): StateChangeResult {
@@ -154,9 +223,9 @@ class DeviceActionExecutor(
             if (actionResolver.detectAuthState(snap) == AuthState.LOGIN_REQUIRED) {
                 return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.LOGIN_REQUIRED, authState = AuthState.LOGIN_REQUIRED)
             }
-            val match = actionResolver.resolveTarget(snap, targetText)
-            if (match != null) {
-                return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = match.node, matchMethod = match.matchMethod)
+            val res = actionResolver.resolveTargetWithAmbiguity(snap, targetText)
+            if (res.match != null) {
+                return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = res.match.node, matchMethod = res.match.matchMethod)
             }
             kotlinx.coroutines.delay(500L)
         }
@@ -165,7 +234,14 @@ class DeviceActionExecutor(
 
     private fun performClickText(targetText: String?, snapshot: UiSnapshot): ActionResult {
         if (targetText.isNullOrBlank()) return ActionResult(status = ActionResultStatus.FAILED, message = "CLICK_TEXT requires target text")
-        val match = actionResolver.resolveTarget(snapshot, targetText)
+        val res = actionResolver.resolveTargetWithAmbiguity(snapshot, targetText)
+            ?: return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Text '$targetText' not found")
+
+        if (res.isAmbiguous) {
+            Log.w(TAG, "AMBIGUOUS_TARGET_CLICK_ATTEMPT: Target '$targetText' matched ${res.candidateCount} nodes. Proceeding with caution.")
+        }
+
+        val match = res.match
             ?: return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Text '$targetText' not found")
 
         val nodeRef = match.node.nodeRef as? android.view.accessibility.AccessibilityNodeInfo
@@ -205,3 +281,8 @@ class DeviceActionExecutor(
         else ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.SCREENSHOT_FAILED, message = "Screenshot capture failed")
     }
 }
+
+data class PreconditionCheckResult(
+    val success: Boolean,
+    val failureReason: String? = null
+)

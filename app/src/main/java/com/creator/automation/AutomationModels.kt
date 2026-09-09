@@ -47,10 +47,58 @@ enum class ActionType {
     END
 }
 
+enum class ActionSemantics {
+    READ_ONLY,
+    IDEMPOTENT,
+    REPEATABLE,
+    NON_IDEMPOTENT,
+    HIGH_RISK
+}
+
+enum class PreconditionType {
+    PACKAGE_MATCH,
+    TEXT_PRESENT,
+    VIEW_ID_PRESENT,
+    EDITABLE_PRESENT,
+    SCROLLABLE_PRESENT,
+    AUTH_AUTHENTICATED
+}
+
+data class ActionPrecondition(
+    val type: PreconditionType,
+    val expectedValue: String? = null
+)
+
+enum class WaitConditionType {
+    WAIT_FOR_TEXT,
+    WAIT_FOR_VIEW_ID,
+    WAIT_FOR_PACKAGE,
+    WAIT_FOR_STATE_CHANGE,
+    WAIT_FOR_VISUAL_CHANGE,
+    WAIT_FOR_STATE_SIGNATURE
+}
+
+data class WaitCondition(
+    val type: WaitConditionType,
+    val expectedValue: String? = null,
+    val timeoutMs: Long = 10000L,
+    val pollIntervalMs: Long = 500L
+)
+
+data class WaitResult(
+    val success: Boolean,
+    val durationMs: Long,
+    val matchedValue: String? = null,
+    val failureReason: String? = null
+)
+
 data class AutomationAction(
     val type: ActionType,
     val targetValue: String? = null,
-    val timeoutMs: Long = 10000L
+    val timeoutMs: Long = 10000L,
+    val semantics: ActionSemantics = ActionSemantics.REPEATABLE,
+    val preconditions: List<ActionPrecondition> = emptyList(),
+    val waitCondition: WaitCondition? = null
 )
 
 enum class ActionResultStatus {
@@ -70,7 +118,12 @@ enum class ExecutionReason {
     UNSUPPORTED_ANDROID_VERSION,
     TIMEOUT,
     VERIFICATION_FAILED,
-    LEARNING_REQUIRED
+    LEARNING_REQUIRED,
+    PRECONDITION_FAILED,
+    AMBIGUOUS_TARGET,
+    STUCK,
+    USER_REQUIRED,
+    STALE_OBSERVATION
 }
 
 enum class ExecutionTrigger {
@@ -85,7 +138,8 @@ enum class ExecutionState {
     SUCCESS,
     FAILED,
     BLOCKED,
-    CANCELLED
+    CANCELLED,
+    NEEDS_USER_INPUT
 }
 
 enum class AuthState {
@@ -114,7 +168,15 @@ data class RetryPolicy(
 data class WorkflowStep(
     val id: String,
     val action: AutomationAction,
-    val verificationAction: AutomationAction? = null
+    val verificationAction: AutomationAction? = null,
+    val conditionBranch: BranchCondition? = null
+)
+
+data class BranchCondition(
+    val ifConditionType: WaitConditionType,
+    val ifExpectedValue: String,
+    val thenStepId: String,
+    val elseStepId: String? = null
 )
 
 data class Workflow(

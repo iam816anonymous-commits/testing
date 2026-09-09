@@ -12,7 +12,8 @@ enum class AgentState {
     RECOVERING,
     COMPLETED,
     FAILED,
-    CANCELLED
+    CANCELLED,
+    NEEDS_USER_INPUT
 }
 
 data class AgentStepResult(

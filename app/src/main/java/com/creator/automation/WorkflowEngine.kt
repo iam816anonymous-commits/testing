@@ -14,7 +14,9 @@ class WorkflowEngine(
     private val autonomousGate: AutonomousExecutionGate = AutonomousExecutionGate(),
     private val learnedWorkflowEngine: LearnedWorkflowEngine = LearnedWorkflowEngine(context, AppDatabase.getDatabase(context).learnedWorkflowDao(), deviceActionExecutor, autonomousGate),
     private val taskResolver: TaskResolver = TaskResolver(AppDatabase.getDatabase(context).learnedWorkflowDao()),
-    private val taskReasoner: TaskReasoner = TaskReasoner(context, deviceActionExecutor, AppDatabase.getDatabase(context).learnedWorkflowDao())
+    private val taskReasoner: TaskReasoner = TaskReasoner(context, deviceActionExecutor, AppDatabase.getDatabase(context).learnedWorkflowDao()),
+    private val branchingEngine: BranchingEngine = BranchingEngine(),
+    private val goalVerifier: GoalVerifier = GoalVerifier(actionResolver)
 ) {
 
     companion object {
@@ -101,11 +103,47 @@ class WorkflowEngine(
             )
         }
 
+        val stuckDetector = StuckDetector()
         var lastSnapshot: UiSnapshot? = null
         var lastScreenshotPath: String? = null
 
-        for (step in workflow.steps) {
+        var currentStepIndex = 0
+        val stepMap = workflow.steps.associateBy { it.id }
+        val stepsList = workflow.steps
+
+        while (currentStepIndex < stepsList.size) {
+            val step = stepsList[currentStepIndex]
             Log.i(TAG, "ACTION_STARTED: Step ${step.id} - ${step.action.type} (target: ${step.action.targetValue})")
+
+            // Check for stuck execution loop
+            val root = service.getRootNode()
+            val snapBefore = ActionResolver.captureSnapshot(root, service.packageName ?: "")
+            val sigBefore = StateSignatureGenerator.generateSignature(snapBefore)
+
+            val stuckEval = stuckDetector.recordStep(sigBefore, step.action.type.name, step.action.targetValue)
+            if (stuckEval.isStuck) {
+                Log.e(TAG, "WORKFLOW_STUCK: ${stuckEval.explanation}")
+                return ActionResult(
+                    status = ActionResultStatus.FAILED,
+                    reason = ExecutionReason.STUCK,
+                    trigger = trigger,
+                    message = "Execution stuck: ${stuckEval.explanation}",
+                    snapshot = snapBefore
+                )
+            }
+
+            // Evaluate conditional branch if attached to step
+            if (step.conditionBranch != null) {
+                val branchDecision = branchingEngine.evaluateBranch(step.conditionBranch, snapBefore)
+                if (branchDecision.shouldBranch && branchDecision.targetStepId != null) {
+                    val targetStep = stepMap[branchDecision.targetStepId]
+                    if (targetStep != null) {
+                        Log.i(TAG, "BRANCH_JUMP: Jumping to step ${targetStep.id} via ${branchDecision.branchTaken}")
+                        currentStepIndex = stepsList.indexOf(targetStep)
+                        continue
+                    }
+                }
+            }
 
             // Enforce bounded recovery (maxRetries = 1 by default)
             val maxRetries = minOf(1, workflow.retryPolicy.maxRetries)
@@ -119,11 +157,10 @@ class WorkflowEngine(
                 }
 
                 if (step.action.type == ActionType.EXECUTE_LEARNED_DECISION) {
-                    val root = service.getRootNode()
-                    val snapshot = ActionResolver.captureSnapshot(root, service.packageName ?: "")
+                    val currentRoot = service.getRootNode()
+                    val snapshot = ActionResolver.captureSnapshot(currentRoot, service.packageName ?: "")
                     val stateSig = StateSignatureGenerator.generateSignature(snapshot)
 
-                    // First, check if a multi-step LearnedWorkflow exists for current state
                     val dao = AppDatabase.getDatabase(context).learnedWorkflowDao()
                     val candidateWorkflows = dao.getWorkflowsForStartingState(stateSig)
 
@@ -137,7 +174,6 @@ class WorkflowEngine(
                             globalAutonomousEnabled = globalAutonomousEnabled
                         )
                     } else {
-                        // Fallback to single-decision LearnedDecisionResolver
                         val proposed = learnedDecisionResolver.resolveDecision(snapshot, globalAutonomousEnabled)
                         val gateEval = autonomousGate.evaluate(
                             learningMode = AutomationAccessibilityService.currentLearningMode.value,
@@ -222,14 +258,23 @@ class WorkflowEngine(
                     snapshot = lastSnapshot
                 )
             }
+
+            currentStepIndex++
         }
 
-        Log.i(TAG, "WORKFLOW_COMPLETED: ${workflow.name} (Trigger: $trigger)")
+        // Final Task Goal Verification
+        val goalVerification = goalVerifier.verifyGoal(
+            expectedGoalText = workflow.steps.lastOrNull()?.action?.targetValue,
+            expectedPackage = workflow.targetPackage,
+            snapshot = lastSnapshot
+        )
+
+        Log.i(TAG, "WORKFLOW_COMPLETED: ${workflow.name} (GoalVerified: ${goalVerification.isVerified})")
         return ActionResult(
-            status = ActionResultStatus.SUCCESS,
-            reason = ExecutionReason.NONE,
+            status = if (goalVerification.isVerified) ActionResultStatus.SUCCESS else ActionResultStatus.FAILED,
+            reason = if (goalVerification.isVerified) ExecutionReason.NONE else ExecutionReason.VERIFICATION_FAILED,
             trigger = trigger,
-            message = "Workflow '${workflow.name}' completed successfully.",
+            message = "Workflow '${workflow.name}' finished. Goal verification: ${goalVerification.explanation}",
             screenshotPath = lastScreenshotPath,
             snapshot = lastSnapshot
         )

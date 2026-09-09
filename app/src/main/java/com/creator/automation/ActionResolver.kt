@@ -11,6 +11,13 @@ data class ResolutionMatch(
     val reason: String
 )
 
+data class TargetResolutionResult(
+    val match: ResolutionMatch?,
+    val candidateCount: Int,
+    val isAmbiguous: Boolean,
+    val explanation: String
+)
+
 class ActionResolver {
 
     companion object {
@@ -112,68 +119,98 @@ class ActionResolver {
      * 4. Accessibility properties / partial text match
      */
     fun resolveTarget(snapshot: UiSnapshot, target: String): ResolutionMatch? {
-        if (target.isBlank()) return null
+        return resolveTargetWithAmbiguity(snapshot, target).match
+    }
+
+    fun resolveTargetWithAmbiguity(snapshot: UiSnapshot, target: String): TargetResolutionResult {
+        if (target.isBlank()) {
+            return TargetResolutionResult(null, 0, false, "Target string is blank")
+        }
 
         val trimmedTarget = target.trim()
 
-        // 1. View ID Match
-        val idMatch = snapshot.allNodes.firstOrNull {
+        // 1. View ID Matches
+        val idMatches = snapshot.allNodes.filter {
             it.viewIdResourceName != null && it.viewIdResourceName.endsWith(trimmedTarget, ignoreCase = true)
         }
-        if (idMatch != null) {
-            Log.d(TAG, "NODE_MATCHED: VIEW_ID -> ${idMatch.viewIdResourceName}")
-            return ResolutionMatch(
-                node = idMatch,
-                matchMethod = "VIEW_ID",
-                confidence = 1.0,
-                reason = "Matched View ID resource name: ${idMatch.viewIdResourceName}"
+        if (idMatches.isNotEmpty()) {
+            val isAmbiguous = idMatches.size > 1
+            val best = idMatches.first()
+            return TargetResolutionResult(
+                match = ResolutionMatch(
+                    node = best,
+                    matchMethod = "VIEW_ID",
+                    confidence = if (isAmbiguous) 0.70 else 1.0,
+                    reason = "Matched View ID resource name: ${best.viewIdResourceName}"
+                ),
+                candidateCount = idMatches.size,
+                isAmbiguous = isAmbiguous,
+                explanation = if (isAmbiguous) "Multiple candidates (${idMatches.size}) matched View ID '$target'" else "Uniquely resolved View ID '$target'"
             )
         }
 
-        // 2. Exact Visible Text Match
-        val exactTextMatch = snapshot.allNodes.firstOrNull {
+        // 2. Exact Visible Text Matches
+        val exactTextMatches = snapshot.allNodes.filter {
             it.text?.equals(trimmedTarget, ignoreCase = true) == true
         }
-        if (exactTextMatch != null) {
-            Log.d(TAG, "NODE_MATCHED: EXACT_TEXT -> '${exactTextMatch.text}'")
-            return ResolutionMatch(
-                node = exactTextMatch,
-                matchMethod = "EXACT_TEXT",
-                confidence = 0.95,
-                reason = "Matched exact visible text: '${exactTextMatch.text}'"
+        if (exactTextMatches.isNotEmpty()) {
+            val isAmbiguous = exactTextMatches.size > 1
+            val best = exactTextMatches.first()
+            return TargetResolutionResult(
+                match = ResolutionMatch(
+                    node = best,
+                    matchMethod = "EXACT_TEXT",
+                    confidence = if (isAmbiguous) 0.65 else 0.95,
+                    reason = "Matched exact visible text: '${best.text}'"
+                ),
+                candidateCount = exactTextMatches.size,
+                isAmbiguous = isAmbiguous,
+                explanation = if (isAmbiguous) "Multiple candidates (${exactTextMatches.size}) matched exact text '$target'" else "Uniquely resolved exact text '$target'"
             )
         }
 
-        // 3. Content Description Match
-        val contentDescMatch = snapshot.allNodes.firstOrNull {
+        // 3. Content Description Matches
+        val contentDescMatches = snapshot.allNodes.filter {
             it.contentDescription?.equals(trimmedTarget, ignoreCase = true) == true
         }
-        if (contentDescMatch != null) {
-            Log.d(TAG, "NODE_MATCHED: CONTENT_DESCRIPTION -> '${contentDescMatch.contentDescription}'")
-            return ResolutionMatch(
-                node = contentDescMatch,
-                matchMethod = "CONTENT_DESCRIPTION",
-                confidence = 0.90,
-                reason = "Matched content description: '${contentDescMatch.contentDescription}'"
+        if (contentDescMatches.isNotEmpty()) {
+            val isAmbiguous = contentDescMatches.size > 1
+            val best = contentDescMatches.first()
+            return TargetResolutionResult(
+                match = ResolutionMatch(
+                    node = best,
+                    matchMethod = "CONTENT_DESCRIPTION",
+                    confidence = if (isAmbiguous) 0.60 else 0.90,
+                    reason = "Matched content description: '${best.contentDescription}'"
+                ),
+                candidateCount = contentDescMatches.size,
+                isAmbiguous = isAmbiguous,
+                explanation = if (isAmbiguous) "Multiple candidates (${contentDescMatches.size}) matched content description '$target'" else "Uniquely resolved content description '$target'"
             )
         }
 
-        // 4. Partial text or content description match
-        val partialTextMatch = snapshot.allNodes.firstOrNull {
+        // 4. Partial text or content description matches
+        val partialMatches = snapshot.allNodes.filter {
             (it.text != null && it.text.contains(trimmedTarget, ignoreCase = true)) ||
                     (it.contentDescription != null && it.contentDescription.contains(trimmedTarget, ignoreCase = true))
         }
-        if (partialTextMatch != null) {
-            Log.d(TAG, "NODE_MATCHED: ACCESSIBILITY_PROPERTIES -> '${partialTextMatch.text ?: partialTextMatch.contentDescription}'")
-            return ResolutionMatch(
-                node = partialTextMatch,
-                matchMethod = "ACCESSIBILITY_PROPERTIES",
-                confidence = 0.75,
-                reason = "Matched partial text/description containing '$trimmedTarget'"
+        if (partialMatches.isNotEmpty()) {
+            val isAmbiguous = partialMatches.size > 1
+            val best = partialMatches.first()
+            return TargetResolutionResult(
+                match = ResolutionMatch(
+                    node = best,
+                    matchMethod = "ACCESSIBILITY_PROPERTIES",
+                    confidence = if (isAmbiguous) 0.50 else 0.75,
+                    reason = "Matched partial text/description containing '$trimmedTarget'"
+                ),
+                candidateCount = partialMatches.size,
+                isAmbiguous = isAmbiguous,
+                explanation = if (isAmbiguous) "Multiple candidates (${partialMatches.size}) matched partial text '$target'" else "Resolved partial text '$target'"
             )
         }
 
-        return null
+        return TargetResolutionResult(null, 0, false, "Target '$target' not found in UI snapshot")
     }
 
     /**

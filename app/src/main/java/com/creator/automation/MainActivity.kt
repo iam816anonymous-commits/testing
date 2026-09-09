@@ -161,7 +161,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V1.1",
+            text = "Creator Automation V2.0",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -193,6 +193,41 @@ fun CreatorAutomationScreen(context: Context) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Structured User Intervention Banner
+        if (agentState == AgentState.NEEDS_USER_INPUT) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "⚠️ USER INTERVENTION REQUIRED",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE65100)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "The agent paused automation because user action is required (e.g. login, permission, or ambiguous UI). Please complete the action on screen, then tap Resume below.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                runtimeManager.resumeRuntime()
+                                statusText = "Resumed post-user intervention"
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
+                    ) {
+                        Text("I Have Completed Action — Resume Agent")
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // Accessibility, Screen & Camera Perception Status Card
         Card(
