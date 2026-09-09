@@ -88,8 +88,8 @@ class DeviceActionExecutor(
             ActionType.TYPE_TEXT -> performTypeText(action.targetValue, action.inputData, beforeSnapshot)
             ActionType.CLEAR_TEXT -> performClearText(action.targetValue, beforeSnapshot)
             ActionType.PRESS_ENTER -> performPressEnter(service, beforeSnapshot)
-            ActionType.SCROLL, ActionType.SCROLL_DOWN -> performScroll(beforeSnapshot, forward = true)
-            ActionType.SCROLL_UP -> performScroll(beforeSnapshot, forward = false)
+            ActionType.SCROLL, ActionType.SCROLL_DOWN -> performScroll(service, beforeSnapshot, forward = true, beforeStateSig = beforeStateSig)
+            ActionType.SCROLL_UP -> performScroll(service, beforeSnapshot, forward = false, beforeStateSig = beforeStateSig)
             ActionType.GO_BACK -> performGoBack(service)
             ActionType.PRESS_HOME -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_HOME, "HOME")
             ActionType.PRESS_RECENTS -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_RECENTS, "RECENTS")
@@ -310,6 +310,10 @@ class DeviceActionExecutor(
 
         val match = res.match
 
+        if (!match.node.isEnabled) {
+            return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.PRECONDITION_FAILED, message = "Target '$targetText' is disabled")
+        }
+
         val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
         if (nodeRef != null) {
             var targetNode: AccessibilityNodeInfo? = nodeRef
@@ -343,6 +347,10 @@ class DeviceActionExecutor(
         }
 
         val match = res.match
+        if (!match.node.isEnabled) {
+            return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.PRECONDITION_FAILED, message = "Target '$targetText' is disabled")
+        }
+
         val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
         if (nodeRef != null) {
             if (nodeRef.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) {
@@ -361,6 +369,10 @@ class DeviceActionExecutor(
         val res = actionResolver.resolveEditableTarget(snapshot, targetLabel)
         if (res.match == null) {
             return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "No editable field found for TYPE_TEXT")
+        }
+
+        if (!res.match.node.isEnabled) {
+            return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.PRECONDITION_FAILED, message = "Editable input field is disabled")
         }
 
         val editableNode = res.match.node.nodeRef as? AccessibilityNodeInfo
@@ -437,11 +449,22 @@ class DeviceActionExecutor(
         return ActionResult(status = ActionResultStatus.SUCCESS, message = "PRESS_ENTER dispatched")
     }
 
-    private fun performScroll(snapshot: UiSnapshot, forward: Boolean): ActionResult {
+    private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String): ActionResult {
         val scrollableNode = snapshot.scrollableNodes.firstOrNull()?.nodeRef as? AccessibilityNodeInfo
         if (scrollableNode != null) {
             val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             if (scrollableNode.performAction(action)) {
+                // Post-scroll verification: Capture fresh snapshot to check for scroll progress
+                kotlinx.coroutines.delay(500L)
+                val afterRoot = service.getRootNode()
+                val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+                val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+                if (beforeStateSig == afterStateSig) {
+                    Log.w(TAG, "SCROLL_NO_PROGRESS: Scroll action produced no UI state change")
+                    return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.STUCK, message = "Scroll action produced no state change (NO_PROGRESS)")
+                }
+
                 return ActionResult(status = ActionResultStatus.SUCCESS)
             }
         }

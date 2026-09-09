@@ -4,6 +4,14 @@ import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 
+enum class TargetResolutionStatus {
+    FOUND_UNIQUE,
+    NOT_FOUND,
+    AMBIGUOUS,
+    NOT_ACTIONABLE,
+    STALE
+}
+
 data class ResolutionMatch(
     val node: UiNodeInfo,
     val matchMethod: String,
@@ -15,6 +23,7 @@ data class TargetResolutionResult(
     val match: ResolutionMatch?,
     val candidateCount: Int,
     val isAmbiguous: Boolean,
+    val status: TargetResolutionStatus = if (match == null) TargetResolutionStatus.NOT_FOUND else if (isAmbiguous) TargetResolutionStatus.AMBIGUOUS else TargetResolutionStatus.FOUND_UNIQUE,
     val explanation: String
 )
 
@@ -148,7 +157,13 @@ class ActionResolver {
 
     fun resolveTargetWithAmbiguity(snapshot: UiSnapshot, target: String): TargetResolutionResult {
         if (target.isBlank()) {
-            return TargetResolutionResult(null, 0, false, "Target string is blank")
+            return TargetResolutionResult(
+                match = null,
+                candidateCount = 0,
+                isAmbiguous = false,
+                status = TargetResolutionStatus.NOT_FOUND,
+                explanation = "Target string is blank"
+            )
         }
 
         val trimmedTarget = target.trim()
@@ -160,6 +175,15 @@ class ActionResolver {
         if (idMatches.isNotEmpty()) {
             val isAmbiguous = idMatches.size > 1
             val best = idMatches.first()
+
+            val status = if (!best.isEnabled || !best.isVisibleToUser) {
+                TargetResolutionStatus.NOT_ACTIONABLE
+            } else if (isAmbiguous) {
+                TargetResolutionStatus.AMBIGUOUS
+            } else {
+                TargetResolutionStatus.FOUND_UNIQUE
+            }
+
             return TargetResolutionResult(
                 match = ResolutionMatch(
                     node = best,
@@ -169,6 +193,7 @@ class ActionResolver {
                 ),
                 candidateCount = idMatches.size,
                 isAmbiguous = isAmbiguous,
+                status = status,
                 explanation = if (isAmbiguous) "Multiple candidates (${idMatches.size}) matched View ID '$target'" else "Uniquely resolved View ID '$target'"
             )
         }
@@ -180,6 +205,15 @@ class ActionResolver {
         if (exactTextMatches.isNotEmpty()) {
             val isAmbiguous = exactTextMatches.size > 1
             val best = exactTextMatches.first()
+
+            val status = if (!best.isEnabled || !best.isVisibleToUser) {
+                TargetResolutionStatus.NOT_ACTIONABLE
+            } else if (isAmbiguous) {
+                TargetResolutionStatus.AMBIGUOUS
+            } else {
+                TargetResolutionStatus.FOUND_UNIQUE
+            }
+
             return TargetResolutionResult(
                 match = ResolutionMatch(
                     node = best,
@@ -189,6 +223,7 @@ class ActionResolver {
                 ),
                 candidateCount = exactTextMatches.size,
                 isAmbiguous = isAmbiguous,
+                status = status,
                 explanation = if (isAmbiguous) "Multiple candidates (${exactTextMatches.size}) matched exact text '$target'" else "Uniquely resolved exact text '$target'"
             )
         }
@@ -200,6 +235,15 @@ class ActionResolver {
         if (contentDescMatches.isNotEmpty()) {
             val isAmbiguous = contentDescMatches.size > 1
             val best = contentDescMatches.first()
+
+            val status = if (!best.isEnabled || !best.isVisibleToUser) {
+                TargetResolutionStatus.NOT_ACTIONABLE
+            } else if (isAmbiguous) {
+                TargetResolutionStatus.AMBIGUOUS
+            } else {
+                TargetResolutionStatus.FOUND_UNIQUE
+            }
+
             return TargetResolutionResult(
                 match = ResolutionMatch(
                     node = best,
@@ -209,6 +253,7 @@ class ActionResolver {
                 ),
                 candidateCount = contentDescMatches.size,
                 isAmbiguous = isAmbiguous,
+                status = status,
                 explanation = if (isAmbiguous) "Multiple candidates (${contentDescMatches.size}) matched content description '$target'" else "Uniquely resolved content description '$target'"
             )
         }
@@ -221,6 +266,15 @@ class ActionResolver {
         if (partialMatches.isNotEmpty()) {
             val isAmbiguous = partialMatches.size > 1
             val best = partialMatches.first()
+
+            val status = if (!best.isEnabled || !best.isVisibleToUser) {
+                TargetResolutionStatus.NOT_ACTIONABLE
+            } else if (isAmbiguous) {
+                TargetResolutionStatus.AMBIGUOUS
+            } else {
+                TargetResolutionStatus.FOUND_UNIQUE
+            }
+
             return TargetResolutionResult(
                 match = ResolutionMatch(
                     node = best,
@@ -230,11 +284,18 @@ class ActionResolver {
                 ),
                 candidateCount = partialMatches.size,
                 isAmbiguous = isAmbiguous,
+                status = status,
                 explanation = if (isAmbiguous) "Multiple candidates (${partialMatches.size}) matched partial text '$target'" else "Resolved partial text '$target'"
             )
         }
 
-        return TargetResolutionResult(null, 0, false, "Target '$target' not found in UI snapshot")
+        return TargetResolutionResult(
+            match = null,
+            candidateCount = 0,
+            isAmbiguous = false,
+            status = TargetResolutionStatus.NOT_FOUND,
+            explanation = "Target '$target' not found in UI snapshot"
+        )
     }
 
     /**
@@ -243,7 +304,7 @@ class ActionResolver {
      */
     fun resolveEditableTarget(snapshot: UiSnapshot, hintOrLabel: String? = null): TargetResolutionResult {
         // 1. If currently focused editable node exists
-        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable }
+        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable && it.isEnabled }
         if (focusedEditable != null) {
             return TargetResolutionResult(
                 match = ResolutionMatch(
@@ -254,6 +315,7 @@ class ActionResolver {
                 ),
                 candidateCount = 1,
                 isAmbiguous = false,
+                status = TargetResolutionStatus.FOUND_UNIQUE,
                 explanation = "Resolved focused editable input field"
             )
         }
@@ -267,9 +329,10 @@ class ActionResolver {
         }
 
         // 3. Fallback: single editable field on screen
-        if (snapshot.editableNodes.isNotEmpty()) {
-            val isAmbiguous = snapshot.editableNodes.size > 1
-            val best = snapshot.editableNodes.first()
+        val activeEditables = snapshot.editableNodes.filter { it.isEnabled }
+        if (activeEditables.isNotEmpty()) {
+            val isAmbiguous = activeEditables.size > 1
+            val best = activeEditables.first()
             return TargetResolutionResult(
                 match = ResolutionMatch(
                     node = best,
@@ -277,13 +340,20 @@ class ActionResolver {
                     confidence = if (isAmbiguous) 0.60 else 0.85,
                     reason = "Resolved editable field from screen"
                 ),
-                candidateCount = snapshot.editableNodes.size,
+                candidateCount = activeEditables.size,
                 isAmbiguous = isAmbiguous,
-                explanation = if (isAmbiguous) "Multiple editable fields (${snapshot.editableNodes.size}) present on screen" else "Uniquely resolved single editable field"
+                status = if (isAmbiguous) TargetResolutionStatus.AMBIGUOUS else TargetResolutionStatus.FOUND_UNIQUE,
+                explanation = if (isAmbiguous) "Multiple editable fields (${activeEditables.size}) present on screen" else "Uniquely resolved single editable field"
             )
         }
 
-        return TargetResolutionResult(null, 0, false, "No editable input field found on current screen")
+        return TargetResolutionResult(
+            match = null,
+            candidateCount = 0,
+            isAmbiguous = false,
+            status = TargetResolutionStatus.NOT_FOUND,
+            explanation = "No editable input field found on current screen"
+        )
     }
 
     /**
