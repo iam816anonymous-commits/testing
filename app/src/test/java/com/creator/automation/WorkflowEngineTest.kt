@@ -3,6 +3,7 @@ package com.creator.automation
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
+import org.mockito.Mockito.`when`
 import org.mockito.Mockito.mock
 
 class WorkflowEngineTest {
@@ -10,7 +11,13 @@ class WorkflowEngineTest {
     @Test
     fun testWorkflowExecution_NullServiceReturnsBlocked() = runTest {
         val workflow = DefaultWorkflows.youtubeStudioReadOnlyWorkflow
-        val engine = WorkflowEngine(mock(android.content.Context::class.java))
+        val context = mock(android.content.Context::class.java)
+        `when`(context.applicationContext).thenReturn(context)
+
+        val actionResolver = mock(ActionResolver::class.java)
+        val decisionResolver = mock(LearnedDecisionResolver::class.java)
+
+        val engine = WorkflowEngine(context, actionResolver, decisionResolver)
 
         val result = engine.executeWorkflow(
             workflow = workflow,

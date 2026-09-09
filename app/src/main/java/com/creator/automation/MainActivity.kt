@@ -56,14 +56,17 @@ fun CreatorAutomationScreen(context: Context) {
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
     val activePackageName by AutomationAccessibilityService.activePackageName.collectAsState()
     val lastAccessibilityEvent by AutomationAccessibilityService.lastAccessibilityEvent.collectAsState()
+    val currentLearningMode by AutomationAccessibilityService.currentLearningMode.collectAsState()
 
     var customUrl by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("Ready") }
     var selectedTab by remember { mutableIntStateOf(0) }
+    var globalAutonomousEnabled by remember { mutableStateOf(true) }
 
     val db = remember { AppDatabase.getDatabase(context) }
     val obsDao = db.observationDao()
     val scheduleDao = db.scheduleDao()
+    val demoDao = db.demonstrationDao()
     val scheduler = remember { AutomationScheduler(context, scheduleDao) }
 
     val observationsFlow = remember { obsDao.getAllObservations() }
@@ -71,6 +74,9 @@ fun CreatorAutomationScreen(context: Context) {
 
     val schedulesFlow = remember { scheduleDao.getAllSchedulesFlow() }
     val schedules by schedulesFlow.collectAsState(initial = emptyList())
+
+    val demonstrationsFlow = remember { demoDao.getAllRecordsFlow() }
+    val demonstrations by demonstrationsFlow.collectAsState(initial = emptyList())
 
     val workflowsState = remember { mutableStateMapOf<String, Boolean>() }
     LaunchedEffect(Unit) {
@@ -90,7 +96,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.3",
+            text = "Creator Automation V0.4",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -107,6 +113,11 @@ fun CreatorAutomationScreen(context: Context) {
             Tab(
                 selected = selectedTab == 1,
                 onClick = { selectedTab = 1 },
+                text = { Text("Learning") }
+            )
+            Tab(
+                selected = selectedTab == 2,
+                onClick = { selectedTab = 2 },
                 text = { Text("Diagnostics") }
             )
         }
@@ -141,7 +152,7 @@ fun CreatorAutomationScreen(context: Context) {
                 if (!isAccessibilityEnabled) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "To enable automation, tap below, locate 'Creator Automation' in Accessibility settings, and toggle it ON.",
+                        text = "To enable automation & learning, tap below, locate 'Creator Automation' in Accessibility settings, and toggle it ON.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -337,7 +348,11 @@ fun CreatorAutomationScreen(context: Context) {
                                         }
 
                                         val engine = WorkflowEngine(context)
-                                        val result = engine.executeWorkflow(workflow, trigger = ExecutionTrigger.MANUAL)
+                                        val result = engine.executeWorkflow(
+                                            workflow = workflow,
+                                            trigger = ExecutionTrigger.MANUAL,
+                                            globalAutonomousEnabled = globalAutonomousEnabled
+                                        )
 
                                         val textSummary = result.snapshot?.visibleTexts?.take(10)?.joinToString("; ") ?: "No UI text"
                                         val observation = AutomationObservation(
@@ -469,6 +484,140 @@ fun CreatorAutomationScreen(context: Context) {
                     )
                 }
             }
+        } else if (selectedTab == 1) {
+            // Learning & Demonstrations Tab
+            Text(
+                text = "Demonstration Learning Controls",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Autonomous Replay:", fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = globalAutonomousEnabled,
+                            onCheckedChange = { globalAutonomousEnabled = it }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Learning Mode: ${currentLearningMode.name}", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                AutomationAccessibilityService.setLearningMode(LearningMode.TRAINING)
+                                statusText = "Learning Mode set to TRAINING (Observing Taps)"
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (currentLearningMode == LearningMode.TRAINING) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Text("Training Mode", fontSize = 11.sp)
+                        }
+
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                AutomationAccessibilityService.setLearningMode(LearningMode.IDLE)
+                                statusText = "Learning Mode set to IDLE"
+                            }
+                        ) {
+                            Text("Pause Training", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Learned Transitions (${demonstrations.size}):",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+
+                if (demonstrations.isNotEmpty()) {
+                    TextButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    demoDao.deleteAllRecords()
+                                }
+                                statusText = "Cleared all learned demonstration records"
+                            }
+                        }
+                    ) {
+                        Text("Clear All", color = Color(0xFFC62828), fontSize = 12.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (demonstrations.isEmpty()) {
+                Text(
+                    text = "No user demonstrations recorded yet. Enable 'Training Mode' and open YouTube Studio to record choice selections (e.g. 'Continue to Studio').",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                demonstrations.forEach { record ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Pkg: ${record.packageName.substringAfterLast(".")}", fontWeight = FontWeight.Bold)
+                                Text(
+                                    "Confidence: ${record.confidenceLevel}",
+                                    fontWeight = FontWeight.Bold,
+                                    color = when (record.confidenceLevel) {
+                                        "HIGH" -> Color(0xFF2E7D32)
+                                        "MEDIUM" -> Color(0xFF1565C0)
+                                        else -> Color(0xFFE65100)
+                                    }
+                                )
+                            }
+                            Text("Action: ${record.actionType} -> '${record.targetText}'", style = MaterialTheme.typography.bodySmall)
+                            Text("Demos: ${record.demonstrationCount} | Successes: ${record.successCount} | Failures: ${record.failureCount}", style = MaterialTheme.typography.bodySmall)
+                            if (record.isAmbiguous) {
+                                Text("⚠️ Conflicting choices detected for state", color = Color(0xFFC62828), fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
         } else {
             // Physical Device Diagnostic Tab
             Text(
@@ -504,6 +653,8 @@ fun CreatorAutomationScreen(context: Context) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Active Package: ${activePackageName ?: "Unknown"}", fontWeight = FontWeight.SemiBold)
                     Text("Last Event: $lastAccessibilityEvent", style = MaterialTheme.typography.bodySmall)
+                    Text("Learning Mode: ${currentLearningMode.name}", style = MaterialTheme.typography.bodySmall)
+                    Text("Autonomous Replay: ${if (globalAutonomousEnabled) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
 
                     Spacer(modifier = Modifier.height(8.dp))
                     HorizontalDivider()
@@ -526,7 +677,9 @@ fun CreatorAutomationScreen(context: Context) {
 
                     if (currentSnapshot != null) {
                         val snap = currentSnapshot!!
+                        val stateSig = StateSignatureGenerator.generateSignature(snap)
                         Text("Snapshot Details:", fontWeight = FontWeight.Bold)
+                        Text("State Signature: $stateSig", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                         Text("Total Nodes: ${snap.totalNodeCount}")
                         Text("Visible Nodes: ${snap.visibleNodeCount}")
                         Text("Clickable Nodes: ${snap.clickableNodeCount}")

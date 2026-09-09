@@ -1,16 +1,18 @@
 package com.creator.automation
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.graphics.Bitmap
 import android.os.Build
 import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
@@ -30,9 +32,19 @@ class AutomationAccessibilityService : AccessibilityService() {
         private val _lastAccessibilityEvent = MutableStateFlow<String>("None")
         val lastAccessibilityEvent: StateFlow<String> = _lastAccessibilityEvent.asStateFlow()
 
+        private val _currentLearningMode = MutableStateFlow(LearningMode.IDLE)
+        val currentLearningMode: StateFlow<LearningMode> = _currentLearningMode.asStateFlow()
+
+        fun setLearningMode(mode: LearningMode) {
+            _currentLearningMode.value = mode
+            Log.i(TAG, "LEARNING_MODE_CHANGED: $mode")
+        }
+
         var instance: AutomationAccessibilityService? = null
             private set
     }
+
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -52,6 +64,58 @@ class AutomationAccessibilityService : AccessibilityService() {
         if (!pkg.isNullOrBlank() && pkg != "com.creator.automation") {
             _activePackageName.value = pkg
             Log.d(TAG, "PACKAGE_CHANGED: $pkg (event: $eventTypeName)")
+        }
+
+        // Capture user interactions when in TRAINING mode
+        if (_currentLearningMode.value == LearningMode.TRAINING && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val clickedText = event.text.firstOrNull()?.toString()?.trim()
+                ?: event.contentDescription?.toString()?.trim()
+
+            if (!clickedText.isNullOrBlank() && !pkg.isNullOrBlank()) {
+                Log.i(TAG, "USER_DEMONSTRATION_DETECTED: Package '$pkg', Clicked Text '$clickedText'")
+                recordUserDemonstration(pkg, clickedText)
+            }
+        }
+    }
+
+    private fun recordUserDemonstration(packageName: String, clickedText: String) {
+        serviceScope.launch {
+            try {
+                val root = rootInActiveWindow
+                val snapshot = ActionResolver.captureSnapshot(root, packageName)
+                val stateSig = StateSignatureGenerator.generateSignature(snapshot)
+
+                val db = AppDatabase.getDatabase(applicationContext)
+                val dao = db.demonstrationDao()
+
+                val existingRecords = dao.getRecordsForState(packageName, stateSig)
+                val existing = existingRecords.firstOrNull { it.targetText == clickedText }
+
+                if (existing != null) {
+                    val updated = existing.copy(
+                        demonstrationCount = existing.demonstrationCount + 1,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    dao.insertRecord(updated)
+                    Log.i(TAG, "DEMONSTRATION_UPDATED: Updated '${clickedText}' count to ${updated.demonstrationCount}")
+                } else {
+                    // Check if conflicting action exists for same state
+                    val hasConflict = existingRecords.any { it.targetText != clickedText }
+                    val newRecord = DemonstrationRecord(
+                        packageName = packageName,
+                        stateSignature = stateSig,
+                        actionType = ActionType.CLICK_TEXT.name,
+                        targetText = clickedText,
+                        confidenceLevel = ConfidenceLevel.CANDIDATE.name,
+                        demonstrationCount = 1,
+                        isAmbiguous = hasConflict
+                    )
+                    dao.insertRecord(newRecord)
+                    Log.i(TAG, "DEMONSTRATION_RECORDED: Saved new transition for '${clickedText}' (Ambiguous: $hasConflict)")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error recording user demonstration", e)
+            }
         }
     }
 

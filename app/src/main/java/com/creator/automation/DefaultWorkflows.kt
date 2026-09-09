@@ -29,19 +29,25 @@ object DefaultWorkflows {
                 )
             ),
             WorkflowStep(
-                id = "step_4_read_visible_ui",
+                id = "step_4_learned_decision_or_continue",
+                action = AutomationAction(
+                    type = ActionType.EXECUTE_LEARNED_DECISION
+                )
+            ),
+            WorkflowStep(
+                id = "step_5_read_visible_ui",
                 action = AutomationAction(
                     type = ActionType.READ_VISIBLE_UI
                 )
             ),
             WorkflowStep(
-                id = "step_5_capture_initial_screen",
+                id = "step_6_capture_initial_screen",
                 action = AutomationAction(
                     type = ActionType.CAPTURE_SCREEN
                 )
             ),
             WorkflowStep(
-                id = "step_6_click_analytics",
+                id = "step_7_click_analytics",
                 action = AutomationAction(
                     type = ActionType.CLICK_TEXT,
                     targetValue = "Analytics",
@@ -54,7 +60,7 @@ object DefaultWorkflows {
                 )
             ),
             WorkflowStep(
-                id = "step_7_capture_analytics_screen",
+                id = "step_8_capture_analytics_screen",
                 action = AutomationAction(
                     type = ActionType.CAPTURE_SCREEN
                 )

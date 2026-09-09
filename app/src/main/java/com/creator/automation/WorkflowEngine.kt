@@ -10,7 +10,10 @@ import kotlinx.coroutines.delay
 
 class WorkflowEngine(
     private val context: Context,
-    private val actionResolver: ActionResolver = ActionResolver()
+    private val actionResolver: ActionResolver = ActionResolver(),
+    private val learnedDecisionResolver: LearnedDecisionResolver = LearnedDecisionResolver(
+        AppDatabase.getDatabase(context).demonstrationDao()
+    )
 ) {
 
     companion object {
@@ -20,7 +23,8 @@ class WorkflowEngine(
     suspend fun executeWorkflow(
         workflow: Workflow,
         service: AutomationAccessibilityService? = AutomationAccessibilityService.instance,
-        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL
+        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
+        globalAutonomousEnabled: Boolean = true
     ): ActionResult {
         Log.i(TAG, "WORKFLOW_STARTED: ${workflow.name} (ID: ${workflow.id}, Trigger: $trigger)")
 
@@ -49,7 +53,7 @@ class WorkflowEngine(
                     delay(workflow.retryPolicy.retryDelayMs)
                 }
 
-                stepResult = executeAction(step.action, service, trigger)
+                stepResult = executeAction(step.action, service, trigger, globalAutonomousEnabled)
                 lastSnapshot = stepResult.snapshot ?: lastSnapshot
                 if (stepResult.screenshotPath != null) {
                     lastScreenshotPath = stepResult.screenshotPath
@@ -73,7 +77,7 @@ class WorkflowEngine(
                     // Check verification action if specified
                     if (step.verificationAction != null) {
                         Log.i(TAG, "VERIFICATION_STARTED: Step ${step.id}")
-                        val verifyResult = executeAction(step.verificationAction, service, trigger)
+                        val verifyResult = executeAction(step.verificationAction, service, trigger, globalAutonomousEnabled)
                         if (verifyResult.status == ActionResultStatus.SUCCESS) {
                             Log.i(TAG, "VERIFICATION_SUCCESS: Step ${step.id}")
                         } else {
@@ -127,7 +131,8 @@ class WorkflowEngine(
     suspend fun executeAction(
         action: AutomationAction,
         service: AutomationAccessibilityService,
-        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL
+        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
+        globalAutonomousEnabled: Boolean = true
     ): ActionResult {
         val root = service.getRootNode()
         val snapshot = ActionResolver.captureSnapshot(root, service.packageName ?: "")
@@ -150,6 +155,57 @@ class WorkflowEngine(
                     Log.e(TAG, "ACTION_FAILED: OPEN_URL error", e)
                     ActionResult(status = ActionResultStatus.FAILED, trigger = trigger, message = e.message, snapshot = snapshot)
                 }
+            }
+
+            ActionType.EXECUTE_LEARNED_DECISION -> {
+                val proposed = learnedDecisionResolver.resolveDecision(snapshot, globalAutonomousEnabled)
+                if (proposed == null || proposed.action == null) {
+                    Log.i(TAG, "LEARNING_REQUIRED: No learned action available for state signature.")
+                    return ActionResult(
+                        status = ActionResultStatus.SUCCESS,
+                        reason = ExecutionReason.LEARNING_REQUIRED,
+                        trigger = trigger,
+                        message = "No learned action needed or available for current state signature",
+                        snapshot = snapshot
+                    )
+                }
+
+                if (proposed.isAmbiguous) {
+                    Log.w(TAG, "AMBIGUOUS_STATE: Cannot execute learned decision because choices are ambiguous")
+                    return ActionResult(
+                        status = ActionResultStatus.BLOCKED,
+                        reason = ExecutionReason.LEARNING_REQUIRED,
+                        trigger = trigger,
+                        message = proposed.reason,
+                        snapshot = snapshot
+                    )
+                }
+
+                if (!proposed.canAutoExecute) {
+                    Log.i(TAG, "ASSISTED_MODE: Decision proposed (${proposed.record.targetText}) but autonomous execution disabled or confidence low (${proposed.confidence})")
+                    return ActionResult(
+                        status = ActionResultStatus.SUCCESS,
+                        reason = ExecutionReason.NONE,
+                        trigger = trigger,
+                        message = "Decision proposed: '${proposed.record.targetText}' (Confidence: ${proposed.confidence})",
+                        snapshot = snapshot
+                    )
+                }
+
+                Log.i(TAG, "EXECUTING_LEARNED_DECISION: Executing '${proposed.action.type}' -> '${proposed.action.targetValue}'")
+                val result = executeAction(proposed.action, service, trigger, globalAutonomousEnabled)
+
+                // Update success / failure stats on record
+                val dao = AppDatabase.getDatabase(context).demonstrationDao()
+                if (result.status == ActionResultStatus.SUCCESS) {
+                    val updated = proposed.record.copy(successCount = proposed.record.successCount + 1)
+                    dao.insertRecord(updated)
+                } else {
+                    val updated = proposed.record.copy(failureCount = proposed.record.failureCount + 1)
+                    dao.insertRecord(updated)
+                }
+
+                result
             }
 
             ActionType.CHECK_AUTH_STATE -> {

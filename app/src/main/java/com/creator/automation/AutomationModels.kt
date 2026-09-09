@@ -43,6 +43,7 @@ enum class ActionType {
     READ_VISIBLE_UI,
     VERIFY_TEXT,
     CHECK_AUTH_STATE,
+    EXECUTE_LEARNED_DECISION,
     END
 }
 
@@ -68,7 +69,8 @@ enum class ExecutionReason {
     SCREENSHOT_FAILED,
     UNSUPPORTED_ANDROID_VERSION,
     TIMEOUT,
-    VERIFICATION_FAILED
+    VERIFICATION_FAILED,
+    LEARNING_REQUIRED
 }
 
 enum class ExecutionTrigger {
