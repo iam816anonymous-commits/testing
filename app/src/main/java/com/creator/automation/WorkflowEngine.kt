@@ -3,10 +3,10 @@ package com.creator.automation
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.delay
-import java.io.File
 
 class WorkflowEngine(
     private val context: Context,
@@ -27,6 +27,7 @@ class WorkflowEngine(
             Log.e(TAG, "WORKFLOW_BLOCKED: AccessibilityService is not enabled/connected")
             return ActionResult(
                 status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.ACCESSIBILITY_DISABLED,
                 message = "AccessibilityService is disabled or not running."
             )
         }
@@ -52,6 +53,19 @@ class WorkflowEngine(
                     lastScreenshotPath = stepResult.screenshotPath
                 }
 
+                // If authentication check indicates LOGIN_REQUIRED, stop workflow gracefully
+                if (stepResult.authState == AuthState.LOGIN_REQUIRED) {
+                    Log.w(TAG, "WORKFLOW_TERMINATED: LOGIN_REQUIRED detected at step ${step.id}")
+                    return ActionResult(
+                        status = ActionResultStatus.BLOCKED,
+                        reason = ExecutionReason.LOGIN_REQUIRED,
+                        message = "Sign-in required to continue YouTube Studio workflow.",
+                        screenshotPath = lastScreenshotPath,
+                        snapshot = lastSnapshot,
+                        authState = AuthState.LOGIN_REQUIRED
+                    )
+                }
+
                 if (stepResult.status == ActionResultStatus.SUCCESS) {
                     // Check verification action if specified
                     if (step.verificationAction != null) {
@@ -63,6 +77,7 @@ class WorkflowEngine(
                             Log.w(TAG, "VERIFICATION_FAILED: Step ${step.id} - ${verifyResult.message}")
                             stepResult = ActionResult(
                                 status = ActionResultStatus.FAILED,
+                                reason = ExecutionReason.VERIFICATION_FAILED,
                                 message = "Verification failed: ${verifyResult.message}",
                                 snapshot = verifyResult.snapshot ?: lastSnapshot
                             )
@@ -80,10 +95,12 @@ class WorkflowEngine(
 
             if (stepResult == null || stepResult.status != ActionResultStatus.SUCCESS) {
                 val finalStatus = stepResult?.status ?: ActionResultStatus.FAILED
+                val finalReason = stepResult?.reason ?: ExecutionReason.NONE
                 val failureMsg = stepResult?.message ?: "Step ${step.id} failed after retries."
                 Log.e(TAG, "WORKFLOW_FAILED: $failureMsg")
                 return ActionResult(
                     status = finalStatus,
+                    reason = finalReason,
                     message = "Workflow '${workflow.name}' failed at step '${step.id}': $failureMsg",
                     screenshotPath = lastScreenshotPath,
                     snapshot = lastSnapshot
@@ -94,6 +111,7 @@ class WorkflowEngine(
         Log.i(TAG, "WORKFLOW_COMPLETED: ${workflow.name}")
         return ActionResult(
             status = ActionResultStatus.SUCCESS,
+            reason = ExecutionReason.NONE,
             message = "Workflow '${workflow.name}' completed successfully.",
             screenshotPath = lastScreenshotPath,
             snapshot = lastSnapshot
@@ -118,9 +136,31 @@ class WorkflowEngine(
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     context.startActivity(intent)
+                    Log.i(TAG, "URL_OPENED: $url")
                     ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
                 } catch (e: Exception) {
-                    ActionResult(status = ActionResultStatus.FAILED, message = e.message)
+                    Log.e(TAG, "ACTION_FAILED: OPEN_URL error", e)
+                    ActionResult(status = ActionResultStatus.FAILED, message = e.message, snapshot = snapshot)
+                }
+            }
+
+            ActionType.CHECK_AUTH_STATE -> {
+                val authState = actionResolver.detectAuthState(snapshot)
+                if (authState == AuthState.LOGIN_REQUIRED) {
+                    ActionResult(
+                        status = ActionResultStatus.BLOCKED,
+                        reason = ExecutionReason.LOGIN_REQUIRED,
+                        message = "Sign-in prompt detected in visible UI",
+                        snapshot = snapshot,
+                        authState = AuthState.LOGIN_REQUIRED
+                    )
+                } else {
+                    ActionResult(
+                        status = ActionResultStatus.SUCCESS,
+                        message = "Authenticated state confirmed",
+                        snapshot = snapshot,
+                        authState = AuthState.AUTHENTICATED
+                    )
                 }
             }
 
@@ -142,10 +182,21 @@ class WorkflowEngine(
                 while (System.currentTimeMillis() - startTime < timeout) {
                     val currentRoot = service.getRootNode()
                     val currentSnapshot = ActionResolver.captureSnapshot(currentRoot, service.packageName ?: "")
-                    val match = actionResolver.resolveTarget(currentSnapshot, targetText)
 
+                    val authState = actionResolver.detectAuthState(currentSnapshot)
+                    if (authState == AuthState.LOGIN_REQUIRED) {
+                        return ActionResult(
+                            status = ActionResultStatus.BLOCKED,
+                            reason = ExecutionReason.LOGIN_REQUIRED,
+                            message = "Login required detected while waiting for '$targetText'",
+                            snapshot = currentSnapshot,
+                            authState = AuthState.LOGIN_REQUIRED
+                        )
+                    }
+
+                    val match = actionResolver.resolveTarget(currentSnapshot, targetText)
                     if (match != null) {
-                        Log.i(TAG, "UI_MATCH_FOUND: ${match.reason}")
+                        Log.i(TAG, "TEXT_FOUND: '$targetText' via ${match.reason}")
                         return ActionResult(
                             status = ActionResultStatus.SUCCESS,
                             matchedNode = match.node,
@@ -157,9 +208,10 @@ class WorkflowEngine(
                     delay(500L)
                 }
 
-                Log.w(TAG, "UI_MATCH_NOT_FOUND: Timeout waiting for '$targetText'")
+                Log.w(TAG, "ACTION_TIMEOUT: Timeout waiting for '$targetText'")
                 ActionResult(
                     status = ActionResultStatus.TIMEOUT,
+                    reason = ExecutionReason.TIMEOUT,
                     message = "Timeout waiting for text: '$targetText'",
                     snapshot = snapshot
                 )
@@ -174,6 +226,7 @@ class WorkflowEngine(
                 val match = actionResolver.resolveTarget(snapshot, targetText)
                     ?: return ActionResult(
                         status = ActionResultStatus.NOT_FOUND,
+                        reason = ExecutionReason.UI_NOT_FOUND,
                         message = "Could not find node for text: '$targetText'",
                         snapshot = snapshot
                     )
@@ -181,7 +234,7 @@ class WorkflowEngine(
                 val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
                 if (nodeRef != null) {
                     var targetNode: AccessibilityNodeInfo? = nodeRef
-                    // Walk up parents if the matched text node itself is not clickable
+                    // Walk up parent chain if the text node itself is not clickable
                     while (targetNode != null && !targetNode.isClickable) {
                         targetNode = targetNode.parent
                     }
@@ -189,6 +242,7 @@ class WorkflowEngine(
                     if (targetNode != null && targetNode.isClickable) {
                         val performed = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                         if (performed) {
+                            Log.i(TAG, "ACTION_SUCCESS: CLICK_TEXT on '$targetText'")
                             return ActionResult(
                                 status = ActionResultStatus.SUCCESS,
                                 matchedNode = match.node,
@@ -199,8 +253,10 @@ class WorkflowEngine(
                     }
                 }
 
+                Log.w(TAG, "ACTION_FAILED: Node found for '$targetText' but click action failed")
                 ActionResult(
                     status = ActionResultStatus.FAILED,
+                    reason = ExecutionReason.UI_NOT_FOUND,
                     message = "Node found for '$targetText' but click action could not be executed",
                     matchedNode = match.node,
                     snapshot = snapshot
@@ -213,11 +269,13 @@ class WorkflowEngine(
                 if (nodeRef != null) {
                     val performed = nodeRef.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     if (performed) {
+                        Log.i(TAG, "ACTION_SUCCESS: SCROLL_FORWARD")
                         return ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
                     }
                 }
                 ActionResult(
                     status = ActionResultStatus.FAILED,
+                    reason = ExecutionReason.UI_NOT_FOUND,
                     message = "No scrollable node available to perform scroll action",
                     snapshot = snapshot
                 )
@@ -226,22 +284,43 @@ class WorkflowEngine(
             ActionType.GO_BACK -> {
                 val performed = service.performGoBack()
                 if (performed) {
+                    Log.i(TAG, "ACTION_SUCCESS: GO_BACK")
                     ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
                 } else {
-                    ActionResult(status = ActionResultStatus.FAILED, message = "Global GO_BACK failed", snapshot = snapshot)
+                    ActionResult(
+                        status = ActionResultStatus.FAILED,
+                        message = "Global GO_BACK failed",
+                        snapshot = snapshot
+                    )
                 }
             }
 
             ActionType.CAPTURE_SCREEN -> {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    Log.w(TAG, "SCREENSHOT_FAILED: Android version < R (API 30)")
+                    return ActionResult(
+                        status = ActionResultStatus.FAILED,
+                        reason = ExecutionReason.UNSUPPORTED_ANDROID_VERSION,
+                        message = "Screenshot API requires Android 11 (API 30)+",
+                        snapshot = snapshot
+                    )
+                }
+
                 val path = service.captureScreenshot()
                 if (path != null) {
                     ActionResult(status = ActionResultStatus.SUCCESS, screenshotPath = path, snapshot = snapshot)
                 } else {
-                    ActionResult(status = ActionResultStatus.FAILED, message = "Failed to capture screenshot", snapshot = snapshot)
+                    ActionResult(
+                        status = ActionResultStatus.FAILED,
+                        reason = ExecutionReason.SCREENSHOT_FAILED,
+                        message = "Failed to capture screenshot",
+                        snapshot = snapshot
+                    )
                 }
             }
 
             ActionType.READ_VISIBLE_UI -> {
+                Log.i(TAG, "READ_VISIBLE_UI: Read ${snapshot.visibleTexts.size} text elements")
                 ActionResult(
                     status = ActionResultStatus.SUCCESS,
                     message = "Read ${snapshot.visibleTexts.size} text elements: ${snapshot.visibleTexts.take(5).joinToString(", ")}",

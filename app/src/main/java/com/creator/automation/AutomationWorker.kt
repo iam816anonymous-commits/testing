@@ -46,6 +46,7 @@ class AutomationWorker(
                 workflowId = workflow.id,
                 packageName = workflow.targetPackage ?: "unknown",
                 result = ActionResultStatus.BLOCKED.name,
+                reason = ExecutionReason.ACCESSIBILITY_DISABLED.name,
                 visibleTextSummary = "AccessibilityService disabled",
                 errorMessage = "AccessibilityService is disabled. Automation cannot proceed."
             )
@@ -61,6 +62,7 @@ class AutomationWorker(
             workflowId = workflow.id,
             packageName = result.snapshot?.packageName ?: workflow.targetPackage ?: "unknown",
             result = result.status.name,
+            reason = result.reason.name,
             visibleTextSummary = textSummary,
             screenshotPath = result.screenshotPath,
             errorMessage = if (result.status != ActionResultStatus.SUCCESS) result.message else null

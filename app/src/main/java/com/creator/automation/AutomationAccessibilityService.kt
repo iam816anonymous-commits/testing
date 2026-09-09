@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.FileOutputStream
-import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -27,6 +26,9 @@ class AutomationAccessibilityService : AccessibilityService() {
 
         private val _activePackageName = MutableStateFlow<String?>("")
         val activePackageName: StateFlow<String?> = _activePackageName.asStateFlow()
+
+        private val _lastAccessibilityEvent = MutableStateFlow<String>("None")
+        val lastAccessibilityEvent: StateFlow<String> = _lastAccessibilityEvent.asStateFlow()
 
         var instance: AutomationAccessibilityService? = null
             private set
@@ -42,9 +44,14 @@ class AutomationAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
+        val eventTypeName = AccessibilityEvent.eventTypeToString(event.eventType)
         val pkg = event.packageName?.toString()
+
+        _lastAccessibilityEvent.value = "$eventTypeName ($pkg)"
+
         if (!pkg.isNullOrBlank() && pkg != "com.creator.automation") {
             _activePackageName.value = pkg
+            Log.d(TAG, "PACKAGE_CHANGED: $pkg (event: $eventTypeName)")
         }
     }
 
@@ -103,6 +110,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                                 bitmap.compress(Bitmap.CompressFormat.PNG, 90, out)
                             }
                             screenshotResult.hardwareBuffer.close()
+                            Log.i(TAG, "SCREENSHOT_CAPTURED: ${file.absolutePath}")
                             continuation.resume(file.absolutePath)
                         } catch (e: Exception) {
                             Log.e(TAG, "Error saving screenshot", e)

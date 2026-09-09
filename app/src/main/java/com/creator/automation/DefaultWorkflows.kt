@@ -23,19 +23,25 @@ object DefaultWorkflows {
                 )
             ),
             WorkflowStep(
-                id = "step_3_read_visible_ui",
+                id = "step_3_check_auth_state",
+                action = AutomationAction(
+                    type = ActionType.CHECK_AUTH_STATE
+                )
+            ),
+            WorkflowStep(
+                id = "step_4_read_visible_ui",
                 action = AutomationAction(
                     type = ActionType.READ_VISIBLE_UI
                 )
             ),
             WorkflowStep(
-                id = "step_4_capture_initial_screen",
+                id = "step_5_capture_initial_screen",
                 action = AutomationAction(
                     type = ActionType.CAPTURE_SCREEN
                 )
             ),
             WorkflowStep(
-                id = "step_5_click_analytics",
+                id = "step_6_click_analytics",
                 action = AutomationAction(
                     type = ActionType.CLICK_TEXT,
                     targetValue = "Analytics",
@@ -48,7 +54,7 @@ object DefaultWorkflows {
                 )
             ),
             WorkflowStep(
-                id = "step_6_capture_analytics_screen",
+                id = "step_7_capture_analytics_screen",
                 action = AutomationAction(
                     type = ActionType.CAPTURE_SCREEN
                 )

@@ -25,7 +25,6 @@ class ActionResolverTest {
             allNodes = listOf(node1)
         )
 
-        // Matching view ID end
         val match = resolver.resolveTarget(snapshot, "analytics_btn")
         assertNotNull(match)
         assertEquals("VIEW_ID", match?.matchMethod)
@@ -80,6 +79,35 @@ class ActionResolverTest {
         assertNotNull(match)
         assertEquals("ACCESSIBILITY_PROPERTIES", match?.matchMethod)
         assertEquals(0.75, match?.confidence ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun testDetectAuthState_LoginRequired() {
+        val snapshot = UiSnapshot(
+            packageName = "com.google.android.gms",
+            allNodes = listOf(
+                UiNodeInfo(text = "Sign in to your Google Account")
+            ),
+            visibleTexts = listOf("Sign in to your Google Account")
+        )
+
+        val authState = resolver.detectAuthState(snapshot)
+        assertEquals(AuthState.LOGIN_REQUIRED, authState)
+    }
+
+    @Test
+    fun testDetectAuthState_Authenticated() {
+        val snapshot = UiSnapshot(
+            packageName = "com.google.android.apps.youtube.creator",
+            allNodes = listOf(
+                UiNodeInfo(text = "Channel Analytics"),
+                UiNodeInfo(text = "Dashboard")
+            ),
+            visibleTexts = listOf("Channel Analytics", "Dashboard")
+        )
+
+        val authState = resolver.detectAuthState(snapshot)
+        assertEquals(AuthState.AUTHENTICATED, authState)
     }
 
     @Test
