@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Creator Automation</string>
+    <string name="accessibility_service_description">Automates UI observations and read-only workflows for Creator Automation.</string>
 </resources>
