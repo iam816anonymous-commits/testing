@@ -2,6 +2,7 @@ package com.creator.automation
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import androidx.camera.core.ImageProxy
 import java.security.MessageDigest
 
 enum class VisualChangeResult {
@@ -76,7 +77,6 @@ object VisualStateAnalyzer {
                 }
             }
         } catch (e: Throwable) {
-            // Graceful fallback for unmocked pixel access in unit tests
             val fallbackSig = "V_W${width}H${height}_pixel_stub"
             return VisualFrameAnalysis(
                 width = width,
@@ -110,6 +110,69 @@ object VisualStateAnalyzer {
             averageLuminance = avgLum,
             visualSignature = signature
         )
+    }
+
+    fun analyzeCameraFrame(imageProxy: ImageProxy): VisualFrameAnalysis {
+        try {
+            val width = imageProxy.width
+            val height = imageProxy.height
+            val planes = imageProxy.planes
+
+            if (planes.isNullOrEmpty()) {
+                return VisualFrameAnalysis(width, height, 0.0, "V_C_W${width}H${height}_empty")
+            }
+
+            val yBuffer = planes[0].buffer
+            val pixelStride = planes[0].pixelStride
+            val rowStride = planes[0].rowStride
+
+            var totalLum = 0.0
+            var samples = 0
+            val lumValues = DoubleArray(16 * 16)
+
+            for (row in 0 until 16) {
+                val y = (row * height / 16).coerceIn(0, maxOf(0, height - 1))
+                for (col in 0 until 16) {
+                    val x = (col * width / 16).coerceIn(0, maxOf(0, width - 1))
+                    val bufferPos = y * rowStride + x * pixelStride
+                    val lum = if (yBuffer != null && bufferPos < yBuffer.limit()) {
+                        (yBuffer.get(bufferPos).toInt() and 0xFF).toDouble()
+                    } else {
+                        128.0
+                    }
+                    lumValues[row * 16 + col] = lum
+                    totalLum += lum
+                    samples++
+                }
+            }
+
+            val avgLum = if (samples > 0) totalLum / samples else 128.0
+
+            val bitString = StringBuilder()
+            for (lum in lumValues) {
+                bitString.append(if (lum >= avgLum) "1" else "0")
+            }
+
+            val hash = hashString(bitString.toString())
+            val signature = "V_C_W${width}H${height}_$hash"
+
+            return VisualFrameAnalysis(
+                width = width,
+                height = height,
+                averageLuminance = avgLum / 255.0,
+                visualSignature = signature
+            )
+        } catch (e: Throwable) {
+            val width = try { imageProxy.width } catch (t: Throwable) { 0 }
+            val height = try { imageProxy.height } catch (t: Throwable) { 0 }
+            return VisualFrameAnalysis(width, height, 0.5, "V_C_W${width}H${height}_stub")
+        } finally {
+            try {
+                imageProxy.close()
+            } catch (e: Throwable) {
+                // Ignore
+            }
+        }
     }
 
     fun compareSignatures(

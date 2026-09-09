@@ -1,5 +1,6 @@
 package com.creator.automation
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -19,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,6 +59,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CreatorAutomationScreen(context: Context) {
     val coroutineScope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
     val activePackageName by AutomationAccessibilityService.activePackageName.collectAsState()
     val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
@@ -64,11 +68,24 @@ fun CreatorAutomationScreen(context: Context) {
     val agentState by AgentCore.agentState.collectAsState()
     val recentAgentLogs by AgentCore.recentAgentLogs.collectAsState()
 
+    // Screen Perception States
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val lastVisualSignature by ScreenObservationProvider.lastVisualSignature.collectAsState()
     val lastFrameWidth by ScreenObservationProvider.lastFrameWidth.collectAsState()
     val lastFrameHeight by ScreenObservationProvider.lastFrameHeight.collectAsState()
     val lastVisualChangeState by ScreenObservationProvider.lastVisualChangeState.collectAsState()
+
+    // Camera Perception States
+    val isCameraPermissionGranted by CameraObservationProvider.isPermissionGranted.collectAsState()
+    val isCameraEnabled by CameraObservationProvider.isCameraEnabled.collectAsState()
+    val isCameraRunning by CameraObservationProvider.isCameraRunning.collectAsState()
+    val lastCameraSignature by CameraObservationProvider.lastCameraSignature.collectAsState()
+    val lastCameraWidth by CameraObservationProvider.lastCameraWidth.collectAsState()
+    val lastCameraHeight by CameraObservationProvider.lastCameraHeight.collectAsState()
+    val lastCameraChangeState by CameraObservationProvider.lastCameraChangeState.collectAsState()
+    val cameraFrameCount by CameraObservationProvider.frameCount.collectAsState()
+    val lastAnalysisDurationMs by CameraObservationProvider.lastAnalysisDurationMs.collectAsState()
+    val averageAnalysisDurationMs by CameraObservationProvider.averageAnalysisDurationMs.collectAsState()
 
     val screenCaptureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -81,6 +98,17 @@ fun CreatorAutomationScreen(context: Context) {
             )
         } else {
             ScreenObservationProvider.stopProjectionSession()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        CameraObservationProvider.updatePermissionStatus(context)
+        if (isGranted) {
+            CameraObservationProvider.enableCameraPerception(context, lifecycleOwner)
+        } else {
+            CameraObservationProvider.disableCameraPerception()
         }
     }
 
@@ -129,7 +157,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.9",
+            text = "Creator Automation V1.0",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -162,7 +190,7 @@ fun CreatorAutomationScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Accessibility & Screen Capture Status Card
+        // Accessibility, Screen & Camera Perception Status Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -252,6 +280,62 @@ fun CreatorAutomationScreen(context: Context) {
                             }
                         ) {
                             Text("Stop Projection", fontSize = 11.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Camera Perception (CameraX):",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isCameraRunning) "🟢 RUNNING" else if (isCameraPermissionGranted) "🟠 READY" else "🔴 NOT_GRANTED",
+                        fontWeight = FontWeight.Bold,
+                        color = if (isCameraRunning) Color(0xFF2E7D32) else if (isCameraPermissionGranted) Color(0xFFE65100) else Color(0xFFC62828)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (!isCameraPermissionGranted) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A))
+                        ) {
+                            Text("Grant Camera Access", fontSize = 11.sp)
+                        }
+                    } else {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                if (isCameraRunning) {
+                                    CameraObservationProvider.disableCameraPerception()
+                                    statusText = "Camera perception disabled"
+                                } else {
+                                    CameraObservationProvider.enableCameraPerception(context, lifecycleOwner)
+                                    statusText = "Camera perception enabled"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isCameraRunning) Color(0xFFC62828) else Color(0xFF2E7D32))
+                        ) {
+                            Text(if (isCameraRunning) "Disable Camera" else "Enable Camera Perception", fontSize = 11.sp)
                         }
                     }
                 }
@@ -784,6 +868,38 @@ fun CreatorAutomationScreen(context: Context) {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Capture On-Demand Screen Observation")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Live Camera Perception Metrics (CameraX)", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Pipeline State: ${if (isCameraRunning) "ACTIVE 🟢" else "INACTIVE"}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Resolution: $lastCameraWidth x $lastCameraHeight px", fontSize = 12.sp)
+                    Text("Visual Signature: ${lastCameraSignature ?: "None"}", fontSize = 12.sp)
+                    Text("Visual Change State: $lastCameraChangeState", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Performance: $cameraFrameCount frames | Last: ${lastAnalysisDurationMs}ms | Avg: ${averageAnalysisDurationMs}ms", fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                val provider = CameraObservationProvider(context)
+                                val obs = provider.captureObservation()
+                                statusText = "Captured Camera Observation: ${obs.visualSignature}"
+                            }
+                        },
+                        enabled = isCameraRunning,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Capture On-Demand Camera Observation")
                     }
                 }
             }

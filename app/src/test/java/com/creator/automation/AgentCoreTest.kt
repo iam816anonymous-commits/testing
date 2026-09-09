@@ -12,6 +12,7 @@ class AgentCoreTest {
     private lateinit var mockContext: Context
     private lateinit var mockObservationProvider: ObservationProvider
     private lateinit var mockScreenObservationProvider: ObservationProvider
+    private lateinit var mockCameraObservationProvider: ObservationProvider
     private lateinit var mockWorkflowEngine: WorkflowEngine
     private lateinit var mockRecoveryManager: RecoveryManager
 
@@ -20,6 +21,7 @@ class AgentCoreTest {
         mockContext = Mockito.mock(Context::class.java)
         mockObservationProvider = Mockito.mock(ObservationProvider::class.java)
         mockScreenObservationProvider = Mockito.mock(ObservationProvider::class.java)
+        mockCameraObservationProvider = Mockito.mock(ObservationProvider::class.java)
         mockWorkflowEngine = Mockito.mock(WorkflowEngine::class.java)
         mockRecoveryManager = Mockito.mock(RecoveryManager::class.java)
 
@@ -32,6 +34,7 @@ class AgentCoreTest {
             context = mockContext,
             observationProvider = mockObservationProvider,
             screenObservationProvider = mockScreenObservationProvider,
+            cameraObservationProvider = mockCameraObservationProvider,
             workflowEngine = mockWorkflowEngine,
             recoveryManager = mockRecoveryManager
         )
@@ -45,6 +48,7 @@ class AgentCoreTest {
             context = mockContext,
             observationProvider = mockObservationProvider,
             screenObservationProvider = mockScreenObservationProvider,
+            cameraObservationProvider = mockCameraObservationProvider,
             workflowEngine = mockWorkflowEngine,
             recoveryManager = mockRecoveryManager
         )
@@ -65,6 +69,7 @@ class AgentCoreTest {
             context = mockContext,
             observationProvider = mockObservationProvider,
             screenObservationProvider = mockScreenObservationProvider,
+            cameraObservationProvider = mockCameraObservationProvider,
             workflowEngine = mockWorkflowEngine,
             recoveryManager = mockRecoveryManager
         )
@@ -82,6 +87,7 @@ class AgentCoreTest {
             context = mockContext,
             observationProvider = mockObservationProvider,
             screenObservationProvider = mockScreenObservationProvider,
+            cameraObservationProvider = mockCameraObservationProvider,
             workflowEngine = mockWorkflowEngine,
             recoveryManager = mockRecoveryManager
         )

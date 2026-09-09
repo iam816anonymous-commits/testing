@@ -10,6 +10,7 @@ class AgentCore(
     private val context: Context,
     private val observationProvider: ObservationProvider = AccessibilityObservationProvider(),
     private val screenObservationProvider: ObservationProvider = ScreenObservationProvider(context),
+    private val cameraObservationProvider: ObservationProvider = CameraObservationProvider(context),
     private val workflowEngine: WorkflowEngine = WorkflowEngine(context),
     private val recoveryManager: RecoveryManager = RecoveryManager()
 ) {
@@ -65,7 +66,7 @@ class AgentCore(
             )
         }
 
-        // 1. OBSERVING (Observe before action - Multi-Source Hierarchy)
+        // 1. OBSERVING (Observe before action - Multi-Source Hierarchy: Accessibility -> Screen -> Camera)
         _agentState.value = AgentState.OBSERVING
         logAgentActivity("AGENT_OBSERVING: Capturing current device observation (Primary: Accessibility)")
         var primaryObservation = observationProvider.captureObservation()
@@ -73,17 +74,27 @@ class AgentCore(
         var screenObservation: CurrentObservation? = null
         val isScreenAuthorized = ScreenObservationProvider.isAuthorized.value
 
-        // Fallback or complement with ScreenObservation if Accessibility is insufficient or screen capture is authorized
-        if (primaryObservation.confidence < 0.5 || primaryObservation.snapshot?.totalNodeCount == 0 || isScreenAuthorized) {
-            if (isScreenAuthorized) {
-                logAgentActivity("AGENT_OBSERVING: Capturing Screen perception observation")
-                screenObservation = screenObservationProvider.captureObservation()
+        var cameraObservation: CurrentObservation? = null
+        val isCameraRunning = CameraObservationProvider.isCameraRunning.value
 
-                // If Accessibility was insufficient, use Screen Observation as primary state fallback
-                if (primaryObservation.confidence < 0.5 || primaryObservation.snapshot?.totalNodeCount == 0) {
-                    logAgentActivity("AGENT_OBSERVING: Accessibility insufficient (${primaryObservation.summary}). Falling back to Screen Observation (${screenObservation.visualSignature}).")
-                    primaryObservation = screenObservation
-                }
+        if (isScreenAuthorized) {
+            logAgentActivity("AGENT_OBSERVING: Capturing Screen perception observation")
+            screenObservation = screenObservationProvider.captureObservation()
+        }
+
+        if (isCameraRunning) {
+            logAgentActivity("AGENT_OBSERVING: Capturing Camera perception observation")
+            cameraObservation = cameraObservationProvider.captureObservation()
+        }
+
+        // Multi-Source Fallback Hierarchy
+        if (primaryObservation.confidence < 0.5 || primaryObservation.snapshot?.totalNodeCount == 0) {
+            if (screenObservation != null && screenObservation.confidence >= 0.5) {
+                logAgentActivity("AGENT_OBSERVING: Accessibility insufficient. Falling back to Screen Observation (${screenObservation.visualSignature}).")
+                primaryObservation = screenObservation
+            } else if (cameraObservation != null && cameraObservation.confidence >= 0.5) {
+                logAgentActivity("AGENT_OBSERVING: Accessibility & Screen insufficient. Falling back to Camera Observation (${cameraObservation.visualSignature}).")
+                primaryObservation = cameraObservation
             }
         }
 
@@ -100,14 +111,18 @@ class AgentCore(
             globalAutonomousEnabled = globalAutonomousEnabled
         )
 
-        // 3. VERIFYING (Observe after action - Semantic + Visual verification)
+        // 3. VERIFYING (Observe after action - Semantic + Visual Screen + Camera verification)
         _agentState.value = AgentState.VERIFYING
         val postObs = observationProvider.captureObservation()
 
         var visualVerificationDetails = ""
-        if (ScreenObservationProvider.isAuthorized.value) {
+        if (isScreenAuthorized) {
             val postScreenObs = screenObservationProvider.captureObservation()
-            visualVerificationDetails = ", visualChange=${postScreenObs.visualChangeState}"
+            visualVerificationDetails += ", screenChange=${postScreenObs.visualChangeState}"
+        }
+        if (isCameraRunning) {
+            val postCameraObs = cameraObservationProvider.captureObservation()
+            visualVerificationDetails += ", cameraChange=${postCameraObs.visualChangeState}"
         }
 
         val verificationStatus = if (result.status == ActionResultStatus.SUCCESS) {

@@ -35,6 +35,7 @@ class DeviceCapabilityProbeTest {
         val capabilityNames = result.reports.map { it.capability }
         assertTrue(capabilityNames.contains(Capability.ACCESSIBILITY))
         assertTrue(capabilityNames.contains(Capability.SCREEN_CAPTURE))
+        assertTrue(capabilityNames.contains(Capability.CAMERA))
         assertTrue(capabilityNames.contains(Capability.WORK_MANAGER))
         assertTrue(capabilityNames.contains(Capability.NETWORK))
         assertTrue(capabilityNames.contains(Capability.STORAGE))
