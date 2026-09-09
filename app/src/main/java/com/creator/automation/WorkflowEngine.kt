@@ -19,15 +19,17 @@ class WorkflowEngine(
 
     suspend fun executeWorkflow(
         workflow: Workflow,
-        service: AutomationAccessibilityService? = AutomationAccessibilityService.instance
+        service: AutomationAccessibilityService? = AutomationAccessibilityService.instance,
+        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL
     ): ActionResult {
-        Log.i(TAG, "WORKFLOW_STARTED: ${workflow.name} (ID: ${workflow.id})")
+        Log.i(TAG, "WORKFLOW_STARTED: ${workflow.name} (ID: ${workflow.id}, Trigger: $trigger)")
 
         if (service == null) {
             Log.e(TAG, "WORKFLOW_BLOCKED: AccessibilityService is not enabled/connected")
             return ActionResult(
                 status = ActionResultStatus.BLOCKED,
                 reason = ExecutionReason.ACCESSIBILITY_DISABLED,
+                trigger = trigger,
                 message = "AccessibilityService is disabled or not running."
             )
         }
@@ -47,7 +49,7 @@ class WorkflowEngine(
                     delay(workflow.retryPolicy.retryDelayMs)
                 }
 
-                stepResult = executeAction(step.action, service)
+                stepResult = executeAction(step.action, service, trigger)
                 lastSnapshot = stepResult.snapshot ?: lastSnapshot
                 if (stepResult.screenshotPath != null) {
                     lastScreenshotPath = stepResult.screenshotPath
@@ -59,6 +61,7 @@ class WorkflowEngine(
                     return ActionResult(
                         status = ActionResultStatus.BLOCKED,
                         reason = ExecutionReason.LOGIN_REQUIRED,
+                        trigger = trigger,
                         message = "Sign-in required to continue YouTube Studio workflow.",
                         screenshotPath = lastScreenshotPath,
                         snapshot = lastSnapshot,
@@ -70,7 +73,7 @@ class WorkflowEngine(
                     // Check verification action if specified
                     if (step.verificationAction != null) {
                         Log.i(TAG, "VERIFICATION_STARTED: Step ${step.id}")
-                        val verifyResult = executeAction(step.verificationAction, service)
+                        val verifyResult = executeAction(step.verificationAction, service, trigger)
                         if (verifyResult.status == ActionResultStatus.SUCCESS) {
                             Log.i(TAG, "VERIFICATION_SUCCESS: Step ${step.id}")
                         } else {
@@ -78,6 +81,7 @@ class WorkflowEngine(
                             stepResult = ActionResult(
                                 status = ActionResultStatus.FAILED,
                                 reason = ExecutionReason.VERIFICATION_FAILED,
+                                trigger = trigger,
                                 message = "Verification failed: ${verifyResult.message}",
                                 snapshot = verifyResult.snapshot ?: lastSnapshot
                             )
@@ -101,6 +105,7 @@ class WorkflowEngine(
                 return ActionResult(
                     status = finalStatus,
                     reason = finalReason,
+                    trigger = trigger,
                     message = "Workflow '${workflow.name}' failed at step '${step.id}': $failureMsg",
                     screenshotPath = lastScreenshotPath,
                     snapshot = lastSnapshot
@@ -108,10 +113,11 @@ class WorkflowEngine(
             }
         }
 
-        Log.i(TAG, "WORKFLOW_COMPLETED: ${workflow.name}")
+        Log.i(TAG, "WORKFLOW_COMPLETED: ${workflow.name} (Trigger: $trigger)")
         return ActionResult(
             status = ActionResultStatus.SUCCESS,
             reason = ExecutionReason.NONE,
+            trigger = trigger,
             message = "Workflow '${workflow.name}' completed successfully.",
             screenshotPath = lastScreenshotPath,
             snapshot = lastSnapshot
@@ -120,7 +126,8 @@ class WorkflowEngine(
 
     suspend fun executeAction(
         action: AutomationAction,
-        service: AutomationAccessibilityService
+        service: AutomationAccessibilityService,
+        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL
     ): ActionResult {
         val root = service.getRootNode()
         val snapshot = ActionResolver.captureSnapshot(root, service.packageName ?: "")
@@ -129,6 +136,7 @@ class WorkflowEngine(
             ActionType.OPEN_URL -> {
                 val url = action.targetValue ?: return ActionResult(
                     status = ActionResultStatus.FAILED,
+                    trigger = trigger,
                     message = "OPEN_URL requires target URL"
                 )
                 try {
@@ -137,10 +145,10 @@ class WorkflowEngine(
                     }
                     context.startActivity(intent)
                     Log.i(TAG, "URL_OPENED: $url")
-                    ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
+                    ActionResult(status = ActionResultStatus.SUCCESS, trigger = trigger, snapshot = snapshot)
                 } catch (e: Exception) {
                     Log.e(TAG, "ACTION_FAILED: OPEN_URL error", e)
-                    ActionResult(status = ActionResultStatus.FAILED, message = e.message, snapshot = snapshot)
+                    ActionResult(status = ActionResultStatus.FAILED, trigger = trigger, message = e.message, snapshot = snapshot)
                 }
             }
 
@@ -150,6 +158,7 @@ class WorkflowEngine(
                     ActionResult(
                         status = ActionResultStatus.BLOCKED,
                         reason = ExecutionReason.LOGIN_REQUIRED,
+                        trigger = trigger,
                         message = "Sign-in prompt detected in visible UI",
                         snapshot = snapshot,
                         authState = AuthState.LOGIN_REQUIRED
@@ -157,6 +166,7 @@ class WorkflowEngine(
                 } else {
                     ActionResult(
                         status = ActionResultStatus.SUCCESS,
+                        trigger = trigger,
                         message = "Authenticated state confirmed",
                         snapshot = snapshot,
                         authState = AuthState.AUTHENTICATED
@@ -167,12 +177,13 @@ class WorkflowEngine(
             ActionType.WAIT -> {
                 val duration = action.targetValue?.toLongOrNull() ?: 2000L
                 delay(duration)
-                ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
+                ActionResult(status = ActionResultStatus.SUCCESS, trigger = trigger, snapshot = snapshot)
             }
 
             ActionType.WAIT_FOR_TEXT, ActionType.VERIFY_TEXT -> {
                 val targetText = action.targetValue ?: return ActionResult(
                     status = ActionResultStatus.FAILED,
+                    trigger = trigger,
                     message = "Action requires target text"
                 )
 
@@ -188,6 +199,7 @@ class WorkflowEngine(
                         return ActionResult(
                             status = ActionResultStatus.BLOCKED,
                             reason = ExecutionReason.LOGIN_REQUIRED,
+                            trigger = trigger,
                             message = "Login required detected while waiting for '$targetText'",
                             snapshot = currentSnapshot,
                             authState = AuthState.LOGIN_REQUIRED
@@ -199,6 +211,7 @@ class WorkflowEngine(
                         Log.i(TAG, "TEXT_FOUND: '$targetText' via ${match.reason}")
                         return ActionResult(
                             status = ActionResultStatus.SUCCESS,
+                            trigger = trigger,
                             matchedNode = match.node,
                             matchMethod = match.matchMethod,
                             snapshot = currentSnapshot
@@ -212,6 +225,7 @@ class WorkflowEngine(
                 ActionResult(
                     status = ActionResultStatus.TIMEOUT,
                     reason = ExecutionReason.TIMEOUT,
+                    trigger = trigger,
                     message = "Timeout waiting for text: '$targetText'",
                     snapshot = snapshot
                 )
@@ -220,6 +234,7 @@ class WorkflowEngine(
             ActionType.CLICK_TEXT -> {
                 val targetText = action.targetValue ?: return ActionResult(
                     status = ActionResultStatus.FAILED,
+                    trigger = trigger,
                     message = "CLICK_TEXT requires target text"
                 )
 
@@ -227,6 +242,7 @@ class WorkflowEngine(
                     ?: return ActionResult(
                         status = ActionResultStatus.NOT_FOUND,
                         reason = ExecutionReason.UI_NOT_FOUND,
+                        trigger = trigger,
                         message = "Could not find node for text: '$targetText'",
                         snapshot = snapshot
                     )
@@ -234,7 +250,7 @@ class WorkflowEngine(
                 val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
                 if (nodeRef != null) {
                     var targetNode: AccessibilityNodeInfo? = nodeRef
-                    // Walk up parent chain if the text node itself is not clickable
+                    // Walk up parent chain if text node itself is not clickable
                     while (targetNode != null && !targetNode.isClickable) {
                         targetNode = targetNode.parent
                     }
@@ -245,6 +261,7 @@ class WorkflowEngine(
                             Log.i(TAG, "ACTION_SUCCESS: CLICK_TEXT on '$targetText'")
                             return ActionResult(
                                 status = ActionResultStatus.SUCCESS,
+                                trigger = trigger,
                                 matchedNode = match.node,
                                 matchMethod = match.matchMethod,
                                 snapshot = snapshot
@@ -257,6 +274,7 @@ class WorkflowEngine(
                 ActionResult(
                     status = ActionResultStatus.FAILED,
                     reason = ExecutionReason.UI_NOT_FOUND,
+                    trigger = trigger,
                     message = "Node found for '$targetText' but click action could not be executed",
                     matchedNode = match.node,
                     snapshot = snapshot
@@ -270,12 +288,13 @@ class WorkflowEngine(
                     val performed = nodeRef.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
                     if (performed) {
                         Log.i(TAG, "ACTION_SUCCESS: SCROLL_FORWARD")
-                        return ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
+                        return ActionResult(status = ActionResultStatus.SUCCESS, trigger = trigger, snapshot = snapshot)
                     }
                 }
                 ActionResult(
                     status = ActionResultStatus.FAILED,
                     reason = ExecutionReason.UI_NOT_FOUND,
+                    trigger = trigger,
                     message = "No scrollable node available to perform scroll action",
                     snapshot = snapshot
                 )
@@ -285,10 +304,11 @@ class WorkflowEngine(
                 val performed = service.performGoBack()
                 if (performed) {
                     Log.i(TAG, "ACTION_SUCCESS: GO_BACK")
-                    ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
+                    ActionResult(status = ActionResultStatus.SUCCESS, trigger = trigger, snapshot = snapshot)
                 } else {
                     ActionResult(
                         status = ActionResultStatus.FAILED,
+                        trigger = trigger,
                         message = "Global GO_BACK failed",
                         snapshot = snapshot
                     )
@@ -301,6 +321,7 @@ class WorkflowEngine(
                     return ActionResult(
                         status = ActionResultStatus.FAILED,
                         reason = ExecutionReason.UNSUPPORTED_ANDROID_VERSION,
+                        trigger = trigger,
                         message = "Screenshot API requires Android 11 (API 30)+",
                         snapshot = snapshot
                     )
@@ -308,11 +329,12 @@ class WorkflowEngine(
 
                 val path = service.captureScreenshot()
                 if (path != null) {
-                    ActionResult(status = ActionResultStatus.SUCCESS, screenshotPath = path, snapshot = snapshot)
+                    ActionResult(status = ActionResultStatus.SUCCESS, trigger = trigger, screenshotPath = path, snapshot = snapshot)
                 } else {
                     ActionResult(
                         status = ActionResultStatus.FAILED,
                         reason = ExecutionReason.SCREENSHOT_FAILED,
+                        trigger = trigger,
                         message = "Failed to capture screenshot",
                         snapshot = snapshot
                     )
@@ -323,13 +345,14 @@ class WorkflowEngine(
                 Log.i(TAG, "READ_VISIBLE_UI: Read ${snapshot.visibleTexts.size} text elements")
                 ActionResult(
                     status = ActionResultStatus.SUCCESS,
+                    trigger = trigger,
                     message = "Read ${snapshot.visibleTexts.size} text elements: ${snapshot.visibleTexts.take(5).joinToString(", ")}",
                     snapshot = snapshot
                 )
             }
 
             ActionType.END -> {
-                ActionResult(status = ActionResultStatus.SUCCESS, snapshot = snapshot)
+                ActionResult(status = ActionResultStatus.SUCCESS, trigger = trigger, snapshot = snapshot)
             }
         }
     }

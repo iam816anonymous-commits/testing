@@ -30,6 +30,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Restore scheduled WorkManager jobs upon launch
+        val scheduler = AutomationScheduler(this)
+        val coroutineScope = kotlinx.coroutines.MainScope()
+        coroutineScope.launch(Dispatchers.IO) {
+            scheduler.restoreAllSchedules()
+        }
+
         setContent {
             MaterialTheme {
                 Surface(
@@ -55,10 +62,15 @@ fun CreatorAutomationScreen(context: Context) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
     val db = remember { AppDatabase.getDatabase(context) }
-    val dao = db.observationDao()
+    val obsDao = db.observationDao()
+    val scheduleDao = db.scheduleDao()
+    val scheduler = remember { AutomationScheduler(context, scheduleDao) }
 
-    val observationsFlow = remember { dao.getAllObservations() }
+    val observationsFlow = remember { obsDao.getAllObservations() }
     val observations by observationsFlow.collectAsState(initial = emptyList())
+
+    val schedulesFlow = remember { scheduleDao.getAllSchedulesFlow() }
+    val schedules by schedulesFlow.collectAsState(initial = emptyList())
 
     val workflowsState = remember { mutableStateMapOf<String, Boolean>() }
     LaunchedEffect(Unit) {
@@ -78,7 +90,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.2",
+            text = "Creator Automation V0.3",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -157,8 +169,12 @@ fun CreatorAutomationScreen(context: Context) {
             Spacer(modifier = Modifier.height(8.dp))
 
             DefaultWorkflows.getAllWorkflows().forEach { workflow ->
-                val isEnabled = workflowsState[workflow.id] ?: true
+                val isWorkflowActive = workflowsState[workflow.id] ?: true
+                val schedule = schedules.firstOrNull { it.workflowId == workflow.id }
+                val isScheduled = schedule?.enabled == true
                 val latestObs = observations.firstOrNull { it.workflowId == workflow.id }
+
+                var requiresCharging by remember(schedule) { mutableStateOf(schedule?.requiresCharging ?: false) }
 
                 Card(
                     modifier = Modifier
@@ -179,18 +195,95 @@ fun CreatorAutomationScreen(context: Context) {
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "${workflow.steps.size} steps • ${if (isEnabled) "Active" else "Disabled"}",
+                                    text = "${workflow.steps.size} steps • ${if (isWorkflowActive) "Active" else "Disabled"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
                             Switch(
-                                checked = isEnabled,
+                                checked = isWorkflowActive,
                                 onCheckedChange = { checked ->
                                     workflowsState[workflow.id] = checked
                                 }
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Schedule Controls
+                        Text("Automatic Schedule (WorkManager):", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isScheduled) "Scheduled (Daily)" else "Not Scheduled",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isScheduled) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Charging Only", fontSize = 11.sp)
+                                Checkbox(
+                                    checked = requiresCharging,
+                                    onCheckedChange = { requiresCharging = it },
+                                    enabled = isWorkflowActive
+                                )
+                            }
+                        }
+
+                        if (isScheduled && schedule != null && schedule.nextExpectedRunTimestamp > 0) {
+                            val nextRunStr = SimpleDateFormat("HH:mm:ss dd/MM", Locale.getDefault())
+                                .format(Date(schedule.nextExpectedRunTimestamp))
+                            Text(
+                                text = "Next Expected Run: $nextRunStr",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF1565C0)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val newSchedule = WorkflowSchedule(
+                                            workflowId = workflow.id,
+                                            enabled = true,
+                                            intervalMinutes = 1440L, // Daily
+                                            requiresCharging = requiresCharging,
+                                            requiresBatteryNotLow = true
+                                        )
+                                        scheduler.scheduleWorkflow(newSchedule)
+                                        statusText = "Scheduled '${workflow.name}' daily in WorkManager"
+                                    }
+                                },
+                                enabled = isWorkflowActive
+                            ) {
+                                Text(if (isScheduled) "Update Schedule" else "Enable Schedule", fontSize = 11.sp)
+                            }
+
+                            if (isScheduled) {
+                                OutlinedButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            scheduler.cancelSchedule(workflow.id)
+                                            statusText = "Cancelled schedule for '${workflow.name}'"
+                                        }
+                                    }
+                                ) {
+                                    Text("Cancel Schedule", fontSize = 11.sp)
+                                }
+                            }
                         }
 
                         if (latestObs != null) {
@@ -199,7 +292,7 @@ fun CreatorAutomationScreen(context: Context) {
                             val timeStr = dateFormat.format(Date(latestObs.timestamp))
 
                             Text(
-                                text = "Last Run: $timeStr | Result: ${latestObs.result} (Reason: ${latestObs.reason})",
+                                text = "Last Run: $timeStr [${latestObs.executionTrigger}] | Result: ${latestObs.result} (${latestObs.reason})",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = when (latestObs.result) {
@@ -224,16 +317,17 @@ fun CreatorAutomationScreen(context: Context) {
                             Button(
                                 onClick = {
                                     coroutineScope.launch {
-                                        statusText = "Executing '${workflow.name}'..."
+                                        statusText = "Executing '${workflow.name}' (Manual)..."
                                         if (!isAccessibilityEnabled) {
                                             statusText = "BLOCKED: AccessibilityService disabled"
                                             withContext(Dispatchers.IO) {
-                                                dao.insertObservation(
+                                                obsDao.insertObservation(
                                                     AutomationObservation(
                                                         workflowId = workflow.id,
                                                         packageName = workflow.targetPackage ?: "unknown",
                                                         result = ActionResultStatus.BLOCKED.name,
                                                         reason = ExecutionReason.ACCESSIBILITY_DISABLED.name,
+                                                        executionTrigger = ExecutionTrigger.MANUAL.name,
                                                         visibleTextSummary = "AccessibilityService disabled",
                                                         errorMessage = "AccessibilityService is disabled."
                                                     )
@@ -243,7 +337,7 @@ fun CreatorAutomationScreen(context: Context) {
                                         }
 
                                         val engine = WorkflowEngine(context)
-                                        val result = engine.executeWorkflow(workflow)
+                                        val result = engine.executeWorkflow(workflow, trigger = ExecutionTrigger.MANUAL)
 
                                         val textSummary = result.snapshot?.visibleTexts?.take(10)?.joinToString("; ") ?: "No UI text"
                                         val observation = AutomationObservation(
@@ -251,21 +345,22 @@ fun CreatorAutomationScreen(context: Context) {
                                             packageName = result.snapshot?.packageName ?: workflow.targetPackage ?: "unknown",
                                             result = result.status.name,
                                             reason = result.reason.name,
+                                            executionTrigger = ExecutionTrigger.MANUAL.name,
                                             visibleTextSummary = textSummary,
                                             screenshotPath = result.screenshotPath,
                                             errorMessage = if (result.status != ActionResultStatus.SUCCESS) result.message else null
                                         )
 
                                         withContext(Dispatchers.IO) {
-                                            dao.insertObservation(observation)
+                                            obsDao.insertObservation(observation)
                                         }
 
                                         statusText = "Finished '${workflow.name}': ${result.status} (${result.reason})"
                                     }
                                 },
-                                enabled = isEnabled
+                                enabled = isWorkflowActive
                             ) {
-                                Text("Run Now")
+                                Text("Run Now (Manual)")
                             }
                         }
                     }
@@ -350,16 +445,6 @@ fun CreatorAutomationScreen(context: Context) {
                 ) {
                     Text("Open URL")
                 }
-
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        scheduleAutomation(context, "yt_studio_read_only")
-                        statusText = "Scheduled YouTube Studio WorkManager Task"
-                    }
-                ) {
-                    Text("Schedule WorkManager")
-                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -378,7 +463,7 @@ fun CreatorAutomationScreen(context: Context) {
                 observations.take(5).forEach { obs ->
                     val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(obs.timestamp))
                     Text(
-                        text = "[$timeStr] ${obs.workflowId} -> ${obs.result} (${obs.reason}) - ${obs.visibleTextSummary.take(35)}...",
+                        text = "[$timeStr] [${obs.executionTrigger}] ${obs.workflowId} -> ${obs.result} (${obs.reason}) - ${obs.visibleTextSummary.take(30)}...",
                         style = MaterialTheme.typography.bodySmall,
                         fontSize = 11.sp
                     )
@@ -421,7 +506,22 @@ fun CreatorAutomationScreen(context: Context) {
                     Text("Last Event: $lastAccessibilityEvent", style = MaterialTheme.typography.bodySmall)
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    Divider()
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Active Schedules (${schedules.size}):", fontWeight = FontWeight.Bold)
+                    schedules.forEach { sched ->
+                        val nextRunStr = if (sched.nextExpectedRunTimestamp > 0) {
+                            SimpleDateFormat("HH:mm:ss dd/MM", Locale.getDefault()).format(Date(sched.nextExpectedRunTimestamp))
+                        } else "N/A"
+                        Text(
+                            "• ${sched.workflowId}: Enabled=${sched.enabled}, NextRun=$nextRunStr",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
                     Spacer(modifier = Modifier.height(8.dp))
 
                     if (currentSnapshot != null) {
@@ -457,18 +557,4 @@ fun openUrl(context: Context, url: String) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     context.startActivity(intent)
-}
-
-fun scheduleAutomation(context: Context, workflowId: String) {
-    val inputData = workDataOf("workflowId" to workflowId)
-    val request = OneTimeWorkRequestBuilder<AutomationWorker>()
-        .setInputData(inputData)
-        .setConstraints(
-            Constraints.Builder()
-                .setRequiresBatteryNotLow(true)
-                .build()
-        )
-        .build()
-
-    WorkManager.getInstance(context).enqueue(request)
 }

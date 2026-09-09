@@ -5,10 +5,15 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [AutomationObservation::class], version = 1, exportSchema = false)
+@Database(
+    entities = [AutomationObservation::class, WorkflowSchedule::class],
+    version = 2,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun observationDao(): AutomationObservationDao
+    abstract fun scheduleDao(): WorkflowScheduleDao
 
     companion object {
         @Volatile

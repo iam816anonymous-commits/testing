@@ -71,6 +71,21 @@ enum class ExecutionReason {
     VERIFICATION_FAILED
 }
 
+enum class ExecutionTrigger {
+    MANUAL,
+    SCHEDULED
+}
+
+enum class ExecutionState {
+    IDLE,
+    SCHEDULED,
+    RUNNING,
+    SUCCESS,
+    FAILED,
+    BLOCKED,
+    CANCELLED
+}
+
 enum class AuthState {
     AUTHENTICATED,
     LOGIN_REQUIRED,
@@ -80,6 +95,7 @@ enum class AuthState {
 data class ActionResult(
     val status: ActionResultStatus,
     val reason: ExecutionReason = ExecutionReason.NONE,
+    val trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
     val message: String? = null,
     val matchedNode: UiNodeInfo? = null,
     val matchMethod: String? = null,

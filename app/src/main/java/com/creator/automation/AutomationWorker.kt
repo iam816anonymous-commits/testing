@@ -16,9 +16,16 @@ class AutomationWorker(
 
     override suspend fun doWork(): Result {
         val workflowId = inputData.getString("workflowId") ?: "yt_studio_read_only"
+        val triggerName = inputData.getString("executionTrigger") ?: ExecutionTrigger.SCHEDULED.name
+        val executionTrigger = try {
+            ExecutionTrigger.valueOf(triggerName)
+        } catch (e: Exception) {
+            ExecutionTrigger.SCHEDULED
+        }
+
         val url = inputData.getString("url")
 
-        Log.i(TAG, "AutomationWorker started for workflowId: $workflowId, url: $url")
+        Log.i(TAG, "AutomationWorker started for workflowId: $workflowId, trigger: $executionTrigger, url: $url")
 
         val workflow = DefaultWorkflows.getAllWorkflows().firstOrNull { it.id == workflowId }
             ?: if (!url.isNullOrBlank()) {
@@ -47,6 +54,7 @@ class AutomationWorker(
                 packageName = workflow.targetPackage ?: "unknown",
                 result = ActionResultStatus.BLOCKED.name,
                 reason = ExecutionReason.ACCESSIBILITY_DISABLED.name,
+                executionTrigger = executionTrigger.name,
                 visibleTextSummary = "AccessibilityService disabled",
                 errorMessage = "AccessibilityService is disabled. Automation cannot proceed."
             )
@@ -55,7 +63,7 @@ class AutomationWorker(
         }
 
         val engine = WorkflowEngine(applicationContext)
-        val result = engine.executeWorkflow(workflow, service)
+        val result = engine.executeWorkflow(workflow, service, executionTrigger)
 
         val textSummary = result.snapshot?.visibleTexts?.take(10)?.joinToString("; ") ?: "No UI text captured"
         val observation = AutomationObservation(
@@ -63,6 +71,7 @@ class AutomationWorker(
             packageName = result.snapshot?.packageName ?: workflow.targetPackage ?: "unknown",
             result = result.status.name,
             reason = result.reason.name,
+            executionTrigger = executionTrigger.name,
             visibleTextSummary = textSummary,
             screenshotPath = result.screenshotPath,
             errorMessage = if (result.status != ActionResultStatus.SUCCESS) result.message else null

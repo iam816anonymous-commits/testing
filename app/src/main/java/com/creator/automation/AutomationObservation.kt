@@ -12,6 +12,7 @@ data class AutomationObservation(
     val packageName: String,
     val result: String,
     val reason: String = "NONE",
+    val executionTrigger: String = "MANUAL",
     val visibleTextSummary: String,
     val screenshotPath: String? = null,
     val errorMessage: String? = null
