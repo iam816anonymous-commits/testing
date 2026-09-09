@@ -11,6 +11,7 @@ class AgentCoreTest {
 
     private lateinit var mockContext: Context
     private lateinit var mockObservationProvider: ObservationProvider
+    private lateinit var mockScreenObservationProvider: ObservationProvider
     private lateinit var mockWorkflowEngine: WorkflowEngine
     private lateinit var mockRecoveryManager: RecoveryManager
 
@@ -18,6 +19,7 @@ class AgentCoreTest {
     fun setUp() {
         mockContext = Mockito.mock(Context::class.java)
         mockObservationProvider = Mockito.mock(ObservationProvider::class.java)
+        mockScreenObservationProvider = Mockito.mock(ObservationProvider::class.java)
         mockWorkflowEngine = Mockito.mock(WorkflowEngine::class.java)
         mockRecoveryManager = Mockito.mock(RecoveryManager::class.java)
 
@@ -26,14 +28,26 @@ class AgentCoreTest {
 
     @Test
     fun testInitialAgentState_IsIdle() {
-        val agentCore = AgentCore(mockContext, mockObservationProvider, mockWorkflowEngine, mockRecoveryManager)
+        val agentCore = AgentCore(
+            context = mockContext,
+            observationProvider = mockObservationProvider,
+            screenObservationProvider = mockScreenObservationProvider,
+            workflowEngine = mockWorkflowEngine,
+            recoveryManager = mockRecoveryManager
+        )
         agentCore.resumeAgent()
         assertEquals(AgentState.IDLE, AgentCore.agentState.value)
     }
 
     @Test
     fun testPauseResumeCancel_TransitionsStateCorrectly() {
-        val agentCore = AgentCore(mockContext, mockObservationProvider, mockWorkflowEngine, mockRecoveryManager)
+        val agentCore = AgentCore(
+            context = mockContext,
+            observationProvider = mockObservationProvider,
+            screenObservationProvider = mockScreenObservationProvider,
+            workflowEngine = mockWorkflowEngine,
+            recoveryManager = mockRecoveryManager
+        )
 
         agentCore.pauseAgent()
         assertEquals(AgentState.PAUSED, AgentCore.agentState.value)
@@ -47,7 +61,13 @@ class AgentCoreTest {
 
     @Test
     fun testExecuteTaskStep_WhenPaused_ReturnsPausedResult() = runBlocking {
-        val agentCore = AgentCore(mockContext, mockObservationProvider, mockWorkflowEngine, mockRecoveryManager)
+        val agentCore = AgentCore(
+            context = mockContext,
+            observationProvider = mockObservationProvider,
+            screenObservationProvider = mockScreenObservationProvider,
+            workflowEngine = mockWorkflowEngine,
+            recoveryManager = mockRecoveryManager
+        )
         agentCore.pauseAgent()
 
         val stepResult = agentCore.executeTaskStep("Find analytics", globalAutonomousEnabled = true)
@@ -58,7 +78,13 @@ class AgentCoreTest {
 
     @Test
     fun testExecuteTaskStep_WhenCancelled_ReturnsCancelledResult() = runBlocking {
-        val agentCore = AgentCore(mockContext, mockObservationProvider, mockWorkflowEngine, mockRecoveryManager)
+        val agentCore = AgentCore(
+            context = mockContext,
+            observationProvider = mockObservationProvider,
+            screenObservationProvider = mockScreenObservationProvider,
+            workflowEngine = mockWorkflowEngine,
+            recoveryManager = mockRecoveryManager
+        )
         agentCore.cancelAgent()
 
         val stepResult = agentCore.executeTaskStep("Find analytics", globalAutonomousEnabled = true)

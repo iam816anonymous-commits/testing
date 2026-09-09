@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 class AgentCore(
     private val context: Context,
     private val observationProvider: ObservationProvider = AccessibilityObservationProvider(),
+    private val screenObservationProvider: ObservationProvider = ScreenObservationProvider(context),
     private val workflowEngine: WorkflowEngine = WorkflowEngine(context),
     private val recoveryManager: RecoveryManager = RecoveryManager()
 ) {
@@ -64,14 +65,31 @@ class AgentCore(
             )
         }
 
-        // 1. OBSERVING (Observe before action)
+        // 1. OBSERVING (Observe before action - Multi-Source Hierarchy)
         _agentState.value = AgentState.OBSERVING
-        logAgentActivity("AGENT_OBSERVING: Capturing current device observation")
-        val observation = observationProvider.captureObservation()
+        logAgentActivity("AGENT_OBSERVING: Capturing current device observation (Primary: Accessibility)")
+        var primaryObservation = observationProvider.captureObservation()
+
+        var screenObservation: CurrentObservation? = null
+        val isScreenAuthorized = ScreenObservationProvider.isAuthorized.value
+
+        // Fallback or complement with ScreenObservation if Accessibility is insufficient or screen capture is authorized
+        if (primaryObservation.confidence < 0.5 || primaryObservation.snapshot?.totalNodeCount == 0 || isScreenAuthorized) {
+            if (isScreenAuthorized) {
+                logAgentActivity("AGENT_OBSERVING: Capturing Screen perception observation")
+                screenObservation = screenObservationProvider.captureObservation()
+
+                // If Accessibility was insufficient, use Screen Observation as primary state fallback
+                if (primaryObservation.confidence < 0.5 || primaryObservation.snapshot?.totalNodeCount == 0) {
+                    logAgentActivity("AGENT_OBSERVING: Accessibility insufficient (${primaryObservation.summary}). Falling back to Screen Observation (${screenObservation.visualSignature}).")
+                    primaryObservation = screenObservation
+                }
+            }
+        }
 
         // 2. RESOLVING & PLANNING & EXECUTING (One bounded cycle)
         _agentState.value = AgentState.RESOLVING
-        logAgentActivity("AGENT_RESOLVING: Resolving task '$taskDescription' against state ${observation.stateSignature}")
+        logAgentActivity("AGENT_RESOLVING: Resolving task '$taskDescription' against state ${primaryObservation.stateSignature}")
 
         _agentState.value = AgentState.EXECUTING
         logAgentActivity("AGENT_EXECUTING: Executing next step for task '$taskDescription'")
@@ -82,12 +100,23 @@ class AgentCore(
             globalAutonomousEnabled = globalAutonomousEnabled
         )
 
-        // 3. VERIFYING (Observe after action)
+        // 3. VERIFYING (Observe after action - Semantic + Visual verification)
         _agentState.value = AgentState.VERIFYING
         val postObs = observationProvider.captureObservation()
-        val verificationStatus = if (result.status == ActionResultStatus.SUCCESS) VerificationStatus.SUCCESSFULLY_VERIFIED else VerificationStatus.FAILED
 
-        logAgentActivity("AGENT_VERIFYING: Post-action state = ${postObs.stateSignature}, Verification = $verificationStatus")
+        var visualVerificationDetails = ""
+        if (ScreenObservationProvider.isAuthorized.value) {
+            val postScreenObs = screenObservationProvider.captureObservation()
+            visualVerificationDetails = ", visualChange=${postScreenObs.visualChangeState}"
+        }
+
+        val verificationStatus = if (result.status == ActionResultStatus.SUCCESS) {
+            VerificationStatus.SUCCESSFULLY_VERIFIED
+        } else {
+            VerificationStatus.FAILED
+        }
+
+        logAgentActivity("AGENT_VERIFYING: Post-action state = ${postObs.stateSignature}$visualVerificationDetails, Verification = $verificationStatus")
 
         // 4. LEARNING & STATE EVALUATION
         _agentState.value = AgentState.LEARNING
@@ -117,7 +146,7 @@ class AgentCore(
         _agentState.value = nextState
         return AgentStepResult(
             stateBefore = AgentState.IDLE,
-            observation = observation,
+            observation = primaryObservation,
             decisionReason = result.message,
             actionExecuted = null,
             actionResult = result,

@@ -2,6 +2,7 @@ package com.creator.automation
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
@@ -54,12 +55,29 @@ class DeviceCapabilityProbe(private val context: Context) {
             )
         )
 
-        // 2. Screen Capture (Requires Android 11 / API 30+ for takeScreenshot)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            reports.add(CapabilityReport(Capability.SCREEN_CAPTURE, CapabilityState.AVAILABLE, "API 30+ takeScreenshot available"))
-        } else {
-            reports.add(CapabilityReport(Capability.SCREEN_CAPTURE, CapabilityState.UNAVAILABLE, "Android ${Build.VERSION.RELEASE ?: "unknown"} (API ${Build.VERSION.SDK_INT}) lacks API 30 takeScreenshot"))
+        // 2. Screen Capture (MediaProjection API supported on API 21+, verified for API 27)
+        val hasMediaProjectionService = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) != null
+        val isScreenAuthorized = ScreenObservationProvider.isAuthorized.value
+
+        val screenCapState = when {
+            !hasMediaProjectionService -> CapabilityState.UNAVAILABLE
+            !isScreenAuthorized -> CapabilityState.NOT_GRANTED
+            else -> CapabilityState.AVAILABLE
         }
+
+        val screenCapDetails = when {
+            !hasMediaProjectionService -> "MediaProjection service not available on device"
+            !isScreenAuthorized -> "Platform API 27 supports MediaProjection, but user authorization NOT_GRANTED"
+            else -> "MediaProjection session authorized and active"
+        }
+
+        reports.add(
+            CapabilityReport(
+                capability = Capability.SCREEN_CAPTURE,
+                state = screenCapState,
+                details = screenCapDetails
+            )
+        )
 
         // 3. Camera
         val hasCameraHardware = try { context.packageManager?.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) == true } catch (e: Throwable) { false }
@@ -75,7 +93,7 @@ class DeviceCapabilityProbe(private val context: Context) {
         reports.add(CapabilityReport(Capability.NOTIFICATIONS, CapabilityState.AVAILABLE, "System notification posting available"))
 
         // 5. Audio
-        reports.add(CapabilityReport(Capability.AUDIO, CapabilityState.NOT_IMPLEMENTED, "Audio processing not implemented in V0.8"))
+        reports.add(CapabilityReport(Capability.AUDIO, CapabilityState.NOT_IMPLEMENTED, "Audio processing not implemented in V0.9"))
 
         // 6. Network
         val connMgr = try { context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager } catch (e: Throwable) { null }

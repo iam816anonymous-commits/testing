@@ -19,5 +19,9 @@ data class CurrentObservation(
     val stateSignature: String,
     val summary: String,
     val confidence: Double = 1.0,
-    val snapshot: UiSnapshot? = null
+    val snapshot: UiSnapshot? = null,
+    val visualSignature: String? = null,
+    val width: Int = 0,
+    val height: Int = 0,
+    val visualChangeState: String? = null
 )

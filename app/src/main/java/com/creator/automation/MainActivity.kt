@@ -1,12 +1,16 @@
 package com.creator.automation
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -55,12 +59,30 @@ fun CreatorAutomationScreen(context: Context) {
     val coroutineScope = rememberCoroutineScope()
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
     val activePackageName by AutomationAccessibilityService.activePackageName.collectAsState()
-    val lastAccessibilityEvent by AutomationAccessibilityService.lastAccessibilityEvent.collectAsState()
-    val currentLearningMode by AutomationAccessibilityService.currentLearningMode.collectAsState()
     val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
 
     val agentState by AgentCore.agentState.collectAsState()
     val recentAgentLogs by AgentCore.recentAgentLogs.collectAsState()
+
+    val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
+    val lastVisualSignature by ScreenObservationProvider.lastVisualSignature.collectAsState()
+    val lastFrameWidth by ScreenObservationProvider.lastFrameWidth.collectAsState()
+    val lastFrameHeight by ScreenObservationProvider.lastFrameHeight.collectAsState()
+    val lastVisualChangeState by ScreenObservationProvider.lastVisualChangeState.collectAsState()
+
+    val screenCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            ScreenObservationProvider.setScreenCaptureAuthorization(
+                context = context,
+                resultCode = result.resultCode,
+                data = result.data!!
+            )
+        } else {
+            ScreenObservationProvider.stopProjectionSession()
+        }
+    }
 
     var customUrl by remember { mutableStateOf("") }
     var userTaskInput by remember { mutableStateOf("") }
@@ -86,17 +108,8 @@ fun CreatorAutomationScreen(context: Context) {
     val schedulesFlow = remember { scheduleDao.getAllSchedulesFlow() }
     val schedules by schedulesFlow.collectAsState(initial = emptyList())
 
-    val demonstrationsFlow = remember { demoDao.getAllRecordsFlow() }
-    val demonstrations by demonstrationsFlow.collectAsState(initial = emptyList())
-
     val learnedWorkflowsFlow = remember { learnedWfDao.getAllWorkflowsFlow() }
     val learnedWorkflows by learnedWorkflowsFlow.collectAsState(initial = emptyList())
-
-    val taskRecordsFlow = remember { taskDao.getAllTasksFlow() }
-    val taskRecords by taskRecordsFlow.collectAsState(initial = emptyList())
-
-    val auditRecordsFlow = remember { auditDao.getAllAuditRecordsFlow() }
-    val auditRecords by auditRecordsFlow.collectAsState(initial = emptyList())
 
     val workflowsState = remember { mutableStateMapOf<String, Boolean>() }
     LaunchedEffect(Unit) {
@@ -116,7 +129,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.8",
+            text = "Creator Automation V0.9",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -149,7 +162,7 @@ fun CreatorAutomationScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Accessibility Service Status Card
+        // Accessibility & Screen Capture Status Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -187,6 +200,59 @@ fun CreatorAutomationScreen(context: Context) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
                         Text("Open Accessibility Settings")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Screen Capture Perception:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isScreenAuthorized) "🟢 AUTHORIZED" else "🟠 NOT_GRANTED",
+                        fontWeight = FontWeight.Bold,
+                        color = if (isScreenAuthorized) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+                            if (projectionManager != null) {
+                                screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                    ) {
+                        Text(if (isScreenAuthorized) "Re-grant Screen Access" else "Grant Screen Access", fontSize = 11.sp)
+                    }
+
+                    if (isScreenAuthorized) {
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                ScreenObservationProvider.stopProjectionSession()
+                                statusText = "Screen capture session stopped"
+                            }
+                        ) {
+                            Text("Stop Projection", fontSize = 11.sp)
+                        }
                     }
                 }
             }
@@ -694,6 +760,36 @@ fun CreatorAutomationScreen(context: Context) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE1F5FE))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Live Screen Perception Metrics", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Capture Width: $lastFrameWidth px, Height: $lastFrameHeight px", fontSize = 12.sp)
+                    Text("Visual Signature: ${lastVisualSignature ?: "None"}", fontSize = 12.sp)
+                    Text("Visual Change State: $lastVisualChangeState", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                val provider = ScreenObservationProvider(context)
+                                val obs = provider.captureObservation()
+                                statusText = "Captured Screen Frame: ${obs.visualSignature}"
+                            }
+                        },
+                        enabled = isScreenAuthorized,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Capture On-Demand Screen Observation")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
 
             Button(
@@ -707,7 +803,7 @@ fun CreatorAutomationScreen(context: Context) {
                 enabled = isAccessibilityEnabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Capture Live UI Snapshot")
+                Text("Capture Live Accessibility UI Snapshot")
             }
 
             if (currentSnapshot != null) {
@@ -716,7 +812,7 @@ fun CreatorAutomationScreen(context: Context) {
                 val stateSig = StateSignatureGenerator.generateSignature(snap)
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Snapshot Details:", fontWeight = FontWeight.Bold)
+                        Text("Accessibility Snapshot Details:", fontWeight = FontWeight.Bold)
                         Text("State Signature: $stateSig", fontSize = 12.sp)
                         Text("Nodes: Total=${snap.totalNodeCount}, Visible=${snap.visibleNodeCount}, Clickable=${snap.clickableNodeCount}")
                     }
