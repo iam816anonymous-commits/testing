@@ -48,19 +48,30 @@ class TaskResolverTest {
     }
 
     @Test
+    fun testResolveTask_UnseenAppTask_GeneratesGenericWorkflow() = runTest {
+        val learnedDao = mock(LearnedWorkflowDao::class.java)
+        val provider = mock(ReasoningProvider::class.java)
+        val resolver = TaskResolver(learnedDao, provider)
+
+        val resolution = resolver.resolveTask("Open Chrome and search for new Telugu movies")
+
+        assertEquals(TaskSource.LOCAL_RULE, resolution.source)
+        assertEquals(ResolutionReason.LOCAL_WORKFLOW_MATCH, resolution.resolutionReason)
+        assertNotNull(resolution.localWorkflow)
+
+        val wf = resolution.localWorkflow!!
+        assertTrue(wf.steps.any { it.action.type == ActionType.LAUNCH_APP && it.action.targetValue == "Chrome" })
+        assertTrue(wf.steps.any { it.action.type == ActionType.TYPE_TEXT && it.action.inputData == "new Telugu movies" })
+        assertTrue(wf.steps.any { it.action.type == ActionType.PRESS_ENTER })
+    }
+
+    @Test
     fun testResolveTask_ChatGPTFallback() = runTest {
         val learnedDao = mock(LearnedWorkflowDao::class.java)
         val provider = mock(ReasoningProvider::class.java)
         val resolver = TaskResolver(learnedDao, provider)
 
         `when`(provider.getProviderName()).thenReturn("ChatGPT")
-        val req = ReasoningRequest(
-            taskDescription = "Unknown Custom Task",
-            currentApp = "unknown",
-            currentStateSignature = "none",
-            visibleUISummary = "no UI",
-            availableActionTypes = ActionType.values().map { it.name }
-        )
 
         val plan = ReasoningPlan(
             taskId = "plan123",

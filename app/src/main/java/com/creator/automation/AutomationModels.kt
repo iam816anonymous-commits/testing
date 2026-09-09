@@ -11,12 +11,15 @@ data class UiSnapshot(
     val viewIds: List<String> = emptyList(),
     val clickableNodes: List<UiNodeInfo> = emptyList(),
     val scrollableNodes: List<UiNodeInfo> = emptyList(),
+    val editableNodes: List<UiNodeInfo> = emptyList(),
+    val focusedNodes: List<UiNodeInfo> = emptyList(),
     val allNodes: List<UiNodeInfo> = emptyList()
 ) {
     val totalNodeCount: Int get() = allNodes.size
     val visibleNodeCount: Int get() = allNodes.count { it.isVisibleToUser }
     val clickableNodeCount: Int get() = clickableNodes.size
     val scrollableNodeCount: Int get() = scrollableNodes.size
+    val editableNodeCount: Int get() = editableNodes.size
 }
 
 data class UiNodeInfo(
@@ -26,21 +29,37 @@ data class UiNodeInfo(
     val className: String? = null,
     val isClickable: Boolean = false,
     val isScrollable: Boolean = false,
+    val isEditable: Boolean = false,
+    val isFocused: Boolean = false,
+    val isFocusable: Boolean = false,
     val isVisibleToUser: Boolean = true,
     val isEnabled: Boolean = true,
+    val parentClassName: String? = null,
+    val parentText: String? = null,
     val boundsInScreen: String? = null,
     val nodeRef: Any? = null
 )
 
 enum class ActionType {
+    LAUNCH_APP,
     OPEN_URL,
     WAIT,
     WAIT_FOR_TEXT,
     CLICK_TEXT,
+    LONG_CLICK,
+    TYPE_TEXT,
+    CLEAR_TEXT,
     SCROLL,
+    SCROLL_UP,
+    SCROLL_DOWN,
+    SWIPE,
     GO_BACK,
+    PRESS_HOME,
+    PRESS_RECENTS,
+    PRESS_ENTER,
     CAPTURE_SCREEN,
     READ_VISIBLE_UI,
+    REFRESH_OBSERVATION,
     VERIFY_TEXT,
     CHECK_AUTH_STATE,
     EXECUTE_LEARNED_DECISION,
@@ -95,6 +114,7 @@ data class WaitResult(
 data class AutomationAction(
     val type: ActionType,
     val targetValue: String? = null,
+    val inputData: String? = null,
     val timeoutMs: Long = 10000L,
     val semantics: ActionSemantics = ActionSemantics.REPEATABLE,
     val preconditions: List<ActionPrecondition> = emptyList(),
@@ -123,7 +143,9 @@ enum class ExecutionReason {
     AMBIGUOUS_TARGET,
     STUCK,
     USER_REQUIRED,
-    STALE_OBSERVATION
+    STALE_OBSERVATION,
+    APP_NOT_INSTALLED,
+    AMBIGUOUS_APPLICATION
 }
 
 enum class ExecutionTrigger {

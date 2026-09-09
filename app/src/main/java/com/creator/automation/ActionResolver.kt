@@ -46,6 +46,8 @@ class ActionResolver {
             val viewIds = mutableListOf<String>()
             val clickableNodes = mutableListOf<UiNodeInfo>()
             val scrollableNodes = mutableListOf<UiNodeInfo>()
+            val editableNodes = mutableListOf<UiNodeInfo>()
+            val focusedNodes = mutableListOf<UiNodeInfo>()
             val allNodes = mutableListOf<UiNodeInfo>()
 
             fun traverse(node: AccessibilityNodeInfo?) {
@@ -54,6 +56,15 @@ class ActionResolver {
                 val text = node.text?.toString()?.trim()
                 val contentDesc = node.contentDescription?.toString()?.trim()
                 val viewId = node.viewIdResourceName
+                val className = node.className?.toString()
+                val parentNode = node.parent
+                val parentClass = parentNode?.className?.toString()
+                val parentTxt = parentNode?.text?.toString()?.trim()
+
+                val isEditable = node.isEditable || className?.contains("EditText", ignoreCase = true) == true
+                val isFocused = node.isFocused
+                val isFocusable = node.isFocusable
+
                 val bounds = Rect()
                 node.getBoundsInScreen(bounds)
 
@@ -61,11 +72,16 @@ class ActionResolver {
                     text = text,
                     contentDescription = contentDesc,
                     viewIdResourceName = viewId,
-                    className = node.className?.toString(),
+                    className = className,
                     isClickable = node.isClickable,
                     isScrollable = node.isScrollable,
+                    isEditable = isEditable,
+                    isFocused = isFocused,
+                    isFocusable = isFocusable,
                     isVisibleToUser = node.isVisibleToUser,
                     isEnabled = node.isEnabled,
+                    parentClassName = parentClass,
+                    parentText = parentTxt,
                     boundsInScreen = bounds.toShortString(),
                     nodeRef = node
                 )
@@ -87,6 +103,12 @@ class ActionResolver {
                 if (node.isScrollable) {
                     scrollableNodes.add(uiNode)
                 }
+                if (isEditable) {
+                    editableNodes.add(uiNode)
+                }
+                if (isFocused) {
+                    focusedNodes.add(uiNode)
+                }
 
                 for (i in 0 until node.childCount) {
                     traverse(node.getChild(i))
@@ -103,10 +125,12 @@ class ActionResolver {
                 viewIds = viewIds.distinct(),
                 clickableNodes = clickableNodes,
                 scrollableNodes = scrollableNodes,
+                editableNodes = editableNodes,
+                focusedNodes = focusedNodes,
                 allNodes = allNodes
             )
 
-            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$packageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}")
+            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$packageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}")
             return snapshot
         }
     }
@@ -211,6 +235,55 @@ class ActionResolver {
         }
 
         return TargetResolutionResult(null, 0, false, "Target '$target' not found in UI snapshot")
+    }
+
+    /**
+     * Resolves an editable target input node (e.g. search bar or text field).
+     * Prefers currently focused editable node, then exact match on hint/text/contentDesc, then any editable node.
+     */
+    fun resolveEditableTarget(snapshot: UiSnapshot, hintOrLabel: String? = null): TargetResolutionResult {
+        // 1. If currently focused editable node exists
+        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable }
+        if (focusedEditable != null) {
+            return TargetResolutionResult(
+                match = ResolutionMatch(
+                    node = focusedEditable,
+                    matchMethod = "FOCUSED_EDITABLE",
+                    confidence = 1.0,
+                    reason = "Resolved currently focused editable field"
+                ),
+                candidateCount = 1,
+                isAmbiguous = false,
+                explanation = "Resolved focused editable input field"
+            )
+        }
+
+        // 2. If hint/label specified, match editable node by text/contentDesc/viewId
+        if (!hintOrLabel.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, hintOrLabel)
+            if (res.match != null && res.match.node.isEditable) {
+                return res
+            }
+        }
+
+        // 3. Fallback: single editable field on screen
+        if (snapshot.editableNodes.isNotEmpty()) {
+            val isAmbiguous = snapshot.editableNodes.size > 1
+            val best = snapshot.editableNodes.first()
+            return TargetResolutionResult(
+                match = ResolutionMatch(
+                    node = best,
+                    matchMethod = "FIRST_EDITABLE",
+                    confidence = if (isAmbiguous) 0.60 else 0.85,
+                    reason = "Resolved editable field from screen"
+                ),
+                candidateCount = snapshot.editableNodes.size,
+                isAmbiguous = isAmbiguous,
+                explanation = if (isAmbiguous) "Multiple editable fields (${snapshot.editableNodes.size}) present on screen" else "Uniquely resolved single editable field"
+            )
+        }
+
+        return TargetResolutionResult(null, 0, false, "No editable input field found on current screen")
     }
 
     /**
