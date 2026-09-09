@@ -14,6 +14,7 @@ class AgentRuntimeManagerTest {
 
     private lateinit var mockContext: Context
     private lateinit var mockSessionDao: AgentSessionDao
+    private lateinit var mockAuditDao: ActionAuditDao
     private lateinit var mockAgentCore: AgentCore
     private lateinit var mockObservationProvider: ObservationProvider
 
@@ -21,6 +22,7 @@ class AgentRuntimeManagerTest {
     fun setUp() {
         mockContext = Mockito.mock(Context::class.java)
         mockSessionDao = Mockito.mock(AgentSessionDao::class.java)
+        mockAuditDao = Mockito.mock(ActionAuditDao::class.java)
         mockAgentCore = Mockito.mock(AgentCore::class.java)
         mockObservationProvider = Mockito.mock(ObservationProvider::class.java)
 
@@ -32,6 +34,7 @@ class AgentRuntimeManagerTest {
         val manager = AgentRuntimeManager(
             context = mockContext,
             sessionDao = mockSessionDao,
+            auditDao = mockAuditDao,
             agentCore = mockAgentCore,
             observationProvider = mockObservationProvider
         )
@@ -66,6 +69,7 @@ class AgentRuntimeManagerTest {
         val manager = AgentRuntimeManager(
             context = mockContext,
             sessionDao = mockSessionDao,
+            auditDao = mockAuditDao,
             agentCore = mockAgentCore,
             observationProvider = mockObservationProvider
         )
@@ -90,18 +94,66 @@ class AgentRuntimeManagerTest {
     }
 
     @Test
-    fun testCancelActiveSession_MarksSessionCancelled() = runBlocking {
+    fun testRecoverInterruptedSessions_CaseD_NonIdempotentUnverified_TransitionsToNeedsUserInput() = runBlocking {
         val manager = AgentRuntimeManager(
             context = mockContext,
             sessionDao = mockSessionDao,
+            auditDao = mockAuditDao,
             agentCore = mockAgentCore,
             observationProvider = mockObservationProvider
         )
 
-        val session = AgentSessionRecord(
-            sessionId = "sess_cancel",
-            taskDescription = "Find analytics",
-            currentState = AgentState.EXECUTING.name
+        val interruptedSession = AgentSessionRecord(
+            sessionId = "sess_non_idempotent",
+            taskDescription = "Submit content form",
+            currentState = AgentState.EXECUTING.name,
+            recoveryAttemptCount = 0
+        )
+
+        val nonIdempotentAudit = ActionAuditRecord(
+            timestamp = System.currentTimeMillis(),
+            workflowId = "wf_submit",
+            trigger = "MANUAL",
+            activePackage = "studio.youtube.com",
+            beforeStateSignature = "sig_before",
+            actionType = "CLICK_TEXT",
+            targetIdentifier = "Publish",
+            actionParametersSummary = "Type=CLICK_TEXT, Timeout=10000ms, Semantics=NON_IDEMPOTENT",
+            dispatchResult = "SUCCESS",
+            verificationStatus = "FAILED"
+        )
+
+        Mockito.`when`(mockSessionDao.getActiveOrInterruptedSessions()).thenReturn(listOf(interruptedSession))
+        Mockito.`when`(mockAuditDao.getLatestAuditRecord()).thenReturn(nonIdempotentAudit)
+        Mockito.`when`(mockObservationProvider.captureObservation()).thenReturn(
+            CurrentObservation(
+                stateSignature = "sig_current",
+                packageName = "studio.youtube.com",
+                summary = "Studio Dashboard"
+            )
+        )
+
+        val recoveredCount = manager.recoverInterruptedSessions()
+
+        assertEquals(1, recoveredCount)
+        // Verify that agentCore.executeTaskStep was NOT called because of Case D safety halt!
+        Mockito.verifyNoInteractions(mockAgentCore)
+        // Verify session was transitioned to NEEDS_USER_INPUT
+        Mockito.verify(mockSessionDao).insertSession(org.mockito.kotlin.check {
+            assertEquals("sess_non_idempotent", it.sessionId)
+            assertEquals(AgentState.NEEDS_USER_INPUT.name, it.currentState)
+            assertTrue(it.failureReason?.contains("NON_IDEMPOTENT") == true)
+        })
+    }
+
+    @Test
+    fun testCancelActiveSession_MarksSessionCancelled() = runBlocking {
+        val manager = AgentRuntimeManager(
+            context = mockContext,
+            sessionDao = mockSessionDao,
+            auditDao = mockAuditDao,
+            agentCore = mockAgentCore,
+            observationProvider = mockObservationProvider
         )
 
         Mockito.`when`(mockSessionDao.getActiveSessionByTaskDescription("Find analytics")).thenReturn(null)

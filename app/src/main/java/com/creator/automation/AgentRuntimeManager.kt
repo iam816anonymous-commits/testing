@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 class AgentRuntimeManager(
     private val context: Context,
     private val sessionDao: AgentSessionDao = AppDatabase.getDatabase(context).agentSessionDao(),
+    private val auditDao: ActionAuditDao = AppDatabase.getDatabase(context).actionAuditDao(),
     private val agentCore: AgentCore = AgentCore(context),
     private val observationProvider: ObservationProvider = AccessibilityObservationProvider()
 ) {
@@ -136,7 +137,29 @@ class AgentRuntimeManager(
                 logRuntimeActivity("RECOVERY_STATE_CHANGED: State signature changed from '$prevSig' to '${currentObs.stateSignature}'. Safe re-evaluation required.")
             }
 
-            // Safely resume task step execution
+            // Inspect last action audit record to check action semantics safety during process death recovery (Case D safety check)
+            val lastAudit = auditDao.getLatestAuditRecord()
+
+            if (lastAudit != null) {
+                val actionSummary = lastAudit.actionParametersSummary ?: ""
+                val isNonIdempotentOrHighRisk = actionSummary.contains("NON_IDEMPOTENT") || actionSummary.contains("HIGH_RISK")
+                val isUnverified = lastAudit.verificationStatus != VerificationStatus.SUCCESSFULLY_VERIFIED.name
+
+                if (isNonIdempotentOrHighRisk && isUnverified) {
+                    logRuntimeActivity("RECOVERY_SAFETY_HALT: Last action '${lastAudit.actionType}' was NON_IDEMPOTENT/HIGH_RISK with unverified outcome post-process-death. Requiring user intervention.")
+                    val needsUserSession = recoveringSession.copy(
+                        currentState = AgentState.NEEDS_USER_INPUT.name,
+                        failureReason = "Uncertain outcome of NON_IDEMPOTENT/HIGH_RISK action '${lastAudit.actionType}' after process death. User intervention required.",
+                        isInterrupted = false,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                    checkpointSession(needsUserSession)
+                    recoveredCount++
+                    continue
+                }
+            }
+
+            // Safely resume task step execution if re-execution is safe
             val stepResult = agentCore.executeTaskStep(
                 taskDescription = session.taskDescription,
                 trigger = ExecutionTrigger.SCHEDULED,

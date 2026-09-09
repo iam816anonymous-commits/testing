@@ -33,7 +33,7 @@ class DeviceActionExecutor(
     ): ActionResult {
         val startTime = System.currentTimeMillis()
 
-        // 1. Capture Before State
+        // 1. Capture Before State (Always capture fresh state)
         val beforeRoot = service.getRootNode()
         val beforeSnapshot = ActionResolver.captureSnapshot(beforeRoot, service.packageName ?: "")
         val beforeStateSig = StateSignatureGenerator.generateSignature(beforeSnapshot)
@@ -42,7 +42,7 @@ class DeviceActionExecutor(
 
         Log.i(TAG, "EXECUTING_ACTION: Type=${action.type}, Target='$redactedTarget', Semantics=${action.semantics}, Pkg='${beforeSnapshot.packageName}'")
 
-        // 2. Check Action Preconditions
+        // 2. Check Action Preconditions (Evaluated against fresh snapshot before dispatch)
         val preconditionResult = checkPreconditions(action.preconditions, beforeSnapshot)
         if (!preconditionResult.success) {
             Log.w(TAG, "PRECONDITION_FAILED: ${preconditionResult.failureReason}")
@@ -56,14 +56,14 @@ class DeviceActionExecutor(
                 targetIdentifier = redactedTarget,
                 actionParametersSummary = "Semantics=${action.semantics}, Preconditions=${action.preconditions.size}",
                 reason = ExecutionReason.PRECONDITION_FAILED.name,
-                dispatchResult = ActionResultStatus.FAILED.name,
+                dispatchResult = ActionResultStatus.BLOCKED.name,
                 verificationStatus = VerificationStatus.FAILED.name,
                 success = false,
                 failureReason = preconditionResult.failureReason
             )
             auditDao.insertAuditRecord(auditRecord)
             return ActionResult(
-                status = ActionResultStatus.FAILED,
+                status = ActionResultStatus.BLOCKED,
                 reason = ExecutionReason.PRECONDITION_FAILED,
                 trigger = trigger,
                 message = preconditionResult.failureReason,
@@ -135,6 +135,7 @@ class DeviceActionExecutor(
             afterStateSignature = afterStateSig,
             stateChangeResult = stateChange.name,
             verificationStatus = verificationStatus.name,
+            reason = dispatchResult.reason.name,
             success = isOverallSuccess,
             failureReason = if (!isOverallSuccess) dispatchResult.message ?: "Verification failed" else null,
             durationMs = durationMs
@@ -142,7 +143,7 @@ class DeviceActionExecutor(
 
         try {
             auditDao.insertAuditRecord(auditRecord)
-            Log.i(TAG, "AUDIT_LOGGED: Action ${action.type} -> Success=$isOverallSuccess, Verification=$verificationStatus, StateChange=$stateChange")
+            Log.i(TAG, "AUDIT_LOGGED: Action ${action.type} -> Success=$isOverallSuccess, Verification=$verificationStatus, Reason=${dispatchResult.reason}")
         } catch (e: Exception) {
             Log.e(TAG, "Error writing action audit record", e)
         }
@@ -224,6 +225,15 @@ class DeviceActionExecutor(
                 return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.LOGIN_REQUIRED, authState = AuthState.LOGIN_REQUIRED)
             }
             val res = actionResolver.resolveTargetWithAmbiguity(snap, targetText)
+            if (res.isAmbiguous) {
+                val redacted = redactSensitiveText(targetText)
+                Log.w(TAG, "AMBIGUOUS_TARGET_BLOCKED: Target '$redacted' matched ${res.candidateCount} nodes during wait. Aborting dispatch.")
+                return ActionResult(
+                    status = ActionResultStatus.BLOCKED,
+                    reason = ExecutionReason.AMBIGUOUS_TARGET,
+                    message = "Target '$redacted' matched ${res.candidateCount} ambiguous UI candidates"
+                )
+            }
             if (res.match != null) {
                 return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = res.match.node, matchMethod = res.match.matchMethod)
             }
@@ -235,14 +245,23 @@ class DeviceActionExecutor(
     private fun performClickText(targetText: String?, snapshot: UiSnapshot): ActionResult {
         if (targetText.isNullOrBlank()) return ActionResult(status = ActionResultStatus.FAILED, message = "CLICK_TEXT requires target text")
         val res = actionResolver.resolveTargetWithAmbiguity(snapshot, targetText)
-            ?: return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Text '$targetText' not found")
 
+        if (res.match == null) {
+            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Text '$targetText' not found")
+        }
+
+        // STRICT AMBIGUOUS TARGET SAFETY: Never blindly select candidate 0 when target is ambiguous!
         if (res.isAmbiguous) {
-            Log.w(TAG, "AMBIGUOUS_TARGET_CLICK_ATTEMPT: Target '$targetText' matched ${res.candidateCount} nodes. Proceeding with caution.")
+            val redacted = redactSensitiveText(targetText)
+            Log.w(TAG, "AMBIGUOUS_TARGET_CLICK_BLOCKED: Target '$redacted' matched ${res.candidateCount} nodes. Execution strictly blocked.")
+            return ActionResult(
+                status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.AMBIGUOUS_TARGET,
+                message = "Target '$redacted' is ambiguous (${res.candidateCount} candidate UI nodes matched)"
+            )
         }
 
         val match = res.match
-            ?: return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Text '$targetText' not found")
 
         val nodeRef = match.node.nodeRef as? android.view.accessibility.AccessibilityNodeInfo
         if (nodeRef != null) {

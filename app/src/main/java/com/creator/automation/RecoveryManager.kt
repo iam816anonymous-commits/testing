@@ -19,9 +19,20 @@ class RecoveryManager(
 
     fun evaluateRecoveryLevel(
         failedStepCount: Int,
-        lastActionResult: ActionResult?
+        lastActionResult: ActionResult?,
+        actionSemantics: ActionSemantics = ActionSemantics.REPEATABLE
     ): RecoveryLevel {
         if (lastActionResult == null) return RecoveryLevel.USER_INTERVENTION
+
+        // HIGH_RISK actions always require user intervention on failure
+        if (actionSemantics == ActionSemantics.HIGH_RISK) {
+            return RecoveryLevel.USER_INTERVENTION
+        }
+
+        // NON_IDEMPOTENT actions with uncertain or blocked status cannot be blindly retried
+        if (actionSemantics == ActionSemantics.NON_IDEMPOTENT && lastActionResult.status != ActionResultStatus.SUCCESS) {
+            return RecoveryLevel.USER_INTERVENTION
+        }
 
         return when (lastActionResult.reason) {
             ExecutionReason.LOGIN_REQUIRED,
@@ -41,10 +52,11 @@ class RecoveryManager(
     fun evaluateRecovery(
         failedStepCount: Int,
         lastActionResult: ActionResult?,
-        currentTask: TaskRecord?
+        currentTask: TaskRecord? = null,
+        actionSemantics: ActionSemantics = ActionSemantics.REPEATABLE
     ): RecoveryOutcome {
-        val level = evaluateRecoveryLevel(failedStepCount, lastActionResult)
-        Log.i(TAG, "RECOVERY_EVALUATION: Level=$level for reason=${lastActionResult?.reason}")
+        val level = evaluateRecoveryLevel(failedStepCount, lastActionResult, actionSemantics)
+        Log.i(TAG, "RECOVERY_EVALUATION: Level=$level for reason=${lastActionResult?.reason}, Semantics=$actionSemantics")
 
         return when (level) {
             RecoveryLevel.LOCAL_REPAIR -> RecoveryOutcome.RETRY
