@@ -66,7 +66,10 @@ fun CreatorAutomationScreen(context: Context) {
     val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
 
     val agentState by AgentCore.agentState.collectAsState()
-    val recentAgentLogs by AgentCore.recentAgentLogs.collectAsState()
+
+    // Persistent Agent Runtime States
+    val activeSession by AgentRuntimeManager.activeSession.collectAsState()
+    val runtimeLogs by AgentRuntimeManager.runtimeLogs.collectAsState()
 
     // Screen Perception States
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
@@ -121,14 +124,15 @@ fun CreatorAutomationScreen(context: Context) {
     val db = remember { AppDatabase.getDatabase(context) }
     val obsDao = db.observationDao()
     val scheduleDao = db.scheduleDao()
-    val demoDao = db.demonstrationDao()
-    val auditDao = db.actionAuditDao()
+    val sessionDao = db.agentSessionDao()
     val learnedWfDao = db.learnedWorkflowDao()
-    val taskDao = db.taskDao()
     val scheduler = remember { AutomationScheduler(context, scheduleDao) }
     val sessionManager = remember { TrainingSessionManager(learnedWfDao) }
-    val agentCore = remember { AgentCore(context) }
+    val runtimeManager = remember { AgentRuntimeManager(context) }
     val capabilityProbe = remember { DeviceCapabilityProbe(context) }
+
+    val sessionsFlow = remember { sessionDao.getAllSessionsFlow() }
+    val allSessions by sessionsFlow.collectAsState(initial = emptyList())
 
     val observationsFlow = remember { obsDao.getAllObservations() }
     val observations by observationsFlow.collectAsState(initial = emptyList())
@@ -157,7 +161,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V1.0",
+            text = "Creator Automation V1.1",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -169,7 +173,7 @@ fun CreatorAutomationScreen(context: Context) {
             Tab(
                 selected = selectedTab == 0,
                 onClick = { selectedTab = 0 },
-                text = { Text("Agent Core") }
+                text = { Text("Agent Runtime") }
             )
             Tab(
                 selected = selectedTab == 1,
@@ -345,13 +349,72 @@ fun CreatorAutomationScreen(context: Context) {
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedTab == 0) {
-            // Agent Core Tab
+            // Agent Runtime Tab
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Agent Loop Status: ${agentState.name}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("Persistent Agent Runtime Status", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Agent Loop State: ${agentState.name}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+
+                    val currSession = activeSession
+                    if (currSession != null) {
+                        Text("Session ID: ${currSession.sessionId}", fontSize = 11.sp)
+                        Text("Task: ${currSession.taskDescription}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Checkpoint State: ${currSession.currentState} | Recoveries: ${currSession.recoveryAttemptCount}", fontSize = 11.sp)
+                        if (currSession.checkpointStateSignature != null) {
+                            Text("Checkpoint Sig: ${currSession.checkpointStateSignature}", fontSize = 11.sp)
+                        }
+                    } else {
+                        Text("Active Session: None", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                coroutineScope.launch {
+                                    runtimeManager.resumeRuntime()
+                                    statusText = "Runtime Resumed"
+                                }
+                            }
+                        ) {
+                            Text("Resume", fontSize = 11.sp)
+                        }
+
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                coroutineScope.launch {
+                                    runtimeManager.pauseRuntime()
+                                    statusText = "Runtime Paused"
+                                }
+                            }
+                        ) {
+                            Text("Pause", fontSize = 11.sp)
+                        }
+
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                coroutineScope.launch {
+                                    runtimeManager.cancelActiveSession("User cancelled via UI")
+                                    statusText = "Session Cancelled"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                        ) {
+                            Text("Cancel", fontSize = 11.sp)
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
@@ -361,32 +424,28 @@ fun CreatorAutomationScreen(context: Context) {
                         Button(
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                agentCore.resumeAgent()
-                                statusText = "Agent Resumed / IDLE"
-                            }
-                        ) {
-                            Text("Resume", fontSize = 11.sp)
-                        }
-
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                agentCore.pauseAgent()
-                                statusText = "Agent Paused"
-                            }
-                        ) {
-                            Text("Pause", fontSize = 11.sp)
-                        }
-
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                agentCore.cancelAgent()
-                                statusText = "Agent Task Cancelled"
+                                coroutineScope.launch {
+                                    val count = runtimeManager.recoverInterruptedSessions()
+                                    statusText = "Recovered $count interrupted session(s)"
+                                }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
                         ) {
-                            Text("Cancel", fontSize = 11.sp)
+                            Text("Recover Interrupted", fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                coroutineScope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        sessionDao.clearFinishedSessions()
+                                    }
+                                    statusText = "Cleared finished sessions"
+                                }
+                            }
+                        ) {
+                            Text("Clear Finished", fontSize = 11.sp)
                         }
                     }
                 }
@@ -399,14 +458,14 @@ fun CreatorAutomationScreen(context: Context) {
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Autonomous Agent Task Solver", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text("Start Persistent Agent Session", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
                         value = userTaskInput,
                         onValueChange = { userTaskInput = it },
-                        label = { Text("Enter Task Description") },
+                        label = { Text("Task Description") },
                         placeholder = { Text("Find analytics for my latest Short") },
                         singleLine = true
                     )
@@ -418,30 +477,54 @@ fun CreatorAutomationScreen(context: Context) {
                             if (userTaskInput.isNotBlank()) {
                                 coroutineScope.launch {
                                     val taskDesc = userTaskInput.trim()
-                                    statusText = "AgentCore executing task: '$taskDesc'..."
-                                    val stepRes = agentCore.executeTaskStep(
+                                    statusText = "Runtime starting session for: '$taskDesc'..."
+                                    val stepRes = runtimeManager.startOrResumeTaskSession(
                                         taskDescription = taskDesc,
                                         globalAutonomousEnabled = globalAutonomousEnabled
                                     )
-                                    statusText = "Agent Loop State: ${stepRes.nextState} (${stepRes.decisionReason})"
+                                    statusText = "Session state: ${stepRes.nextState} (${stepRes.decisionReason})"
                                 }
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Execute Task via Agent Core")
+                        Text("Start Persistent Task Session")
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Recent Agent Activity Log:", fontWeight = FontWeight.Bold)
+            Text("Persistent Runtime Session History (${allSessions.size}):", fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
-            if (recentAgentLogs.isEmpty()) {
-                Text("No agent loop activity recorded yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            if (allSessions.isEmpty()) {
+                Text("No persistent agent sessions recorded.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                recentAgentLogs.forEach { logLine ->
+                allSessions.take(5).forEach { sess ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("Task: ${sess.taskDescription}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("State: ${sess.currentState} | Recoveries: ${sess.recoveryAttemptCount}", fontSize = 11.sp)
+                            if (sess.checkpointStateSignature != null) {
+                                Text("Sig: ${sess.checkpointStateSignature}", fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text("Recent Agent Runtime Activity Log:", fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            if (runtimeLogs.isEmpty()) {
+                Text("No runtime logs recorded yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                runtimeLogs.take(10).forEach { logLine ->
                     Text(logLine, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
                 }
             }

@@ -13,9 +13,10 @@ import androidx.room.RoomDatabase
         ActionAuditRecord::class,
         LearnedWorkflow::class,
         LearnedWorkflowStep::class,
-        TaskRecord::class
+        TaskRecord::class,
+        AgentSessionRecord::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun actionAuditDao(): ActionAuditDao
     abstract fun learnedWorkflowDao(): LearnedWorkflowDao
     abstract fun taskDao(): TaskDao
+    abstract fun agentSessionDao(): AgentSessionDao
 
     companion object {
         @Volatile
