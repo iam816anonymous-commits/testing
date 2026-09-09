@@ -57,6 +57,7 @@ fun CreatorAutomationScreen(context: Context) {
     val activePackageName by AutomationAccessibilityService.activePackageName.collectAsState()
     val lastAccessibilityEvent by AutomationAccessibilityService.lastAccessibilityEvent.collectAsState()
     val currentLearningMode by AutomationAccessibilityService.currentLearningMode.collectAsState()
+    val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
 
     var customUrl by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("Ready") }
@@ -68,7 +69,9 @@ fun CreatorAutomationScreen(context: Context) {
     val scheduleDao = db.scheduleDao()
     val demoDao = db.demonstrationDao()
     val auditDao = db.actionAuditDao()
+    val learnedWfDao = db.learnedWorkflowDao()
     val scheduler = remember { AutomationScheduler(context, scheduleDao) }
+    val sessionManager = remember { TrainingSessionManager(learnedWfDao) }
 
     val observationsFlow = remember { obsDao.getAllObservations() }
     val observations by observationsFlow.collectAsState(initial = emptyList())
@@ -78,6 +81,9 @@ fun CreatorAutomationScreen(context: Context) {
 
     val demonstrationsFlow = remember { demoDao.getAllRecordsFlow() }
     val demonstrations by demonstrationsFlow.collectAsState(initial = emptyList())
+
+    val learnedWorkflowsFlow = remember { learnedWfDao.getAllWorkflowsFlow() }
+    val learnedWorkflows by learnedWorkflowsFlow.collectAsState(initial = emptyList())
 
     val auditRecordsFlow = remember { auditDao.getAllAuditRecordsFlow() }
     val auditRecords by auditRecordsFlow.collectAsState(initial = emptyList())
@@ -100,7 +106,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.5",
+            text = "Creator Automation V0.6",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -519,7 +525,7 @@ fun CreatorAutomationScreen(context: Context) {
                     HorizontalDivider()
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Text("Learning Mode: ${currentLearningMode.name}", fontWeight = FontWeight.Bold)
+                    Text("Workflow Training Session: ${if (isTrainingActive) "ACTIVE 🔴" else "INACTIVE"}", fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
@@ -529,24 +535,82 @@ fun CreatorAutomationScreen(context: Context) {
                         Button(
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                AutomationAccessibilityService.setLearningMode(LearningMode.TRAINING)
-                                statusText = "Learning Mode set to TRAINING (Observing Taps)"
+                                val id = sessionManager.startSession()
+                                statusText = "Started training session: $id"
                             },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (currentLearningMode == LearningMode.TRAINING) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary
-                            )
+                            enabled = !isTrainingActive,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
                         ) {
-                            Text("Training Mode", fontSize = 11.sp)
+                            Text("Start Training Session", fontSize = 11.sp)
                         }
 
                         Button(
                             modifier = Modifier.weight(1f),
                             onClick = {
-                                AutomationAccessibilityService.setLearningMode(LearningMode.IDLE)
-                                statusText = "Learning Mode set to IDLE"
-                            }
+                                coroutineScope.launch {
+                                    val assembled = sessionManager.stopSessionAndAssembleWorkflow()
+                                    statusText = if (assembled != null) "Assembled '${assembled.name}'" else "Session ended (No steps)"
+                                }
+                            },
+                            enabled = isTrainingActive,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                         ) {
-                            Text("Pause Training", fontSize = 11.sp)
+                            Text("Stop & Assemble", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Assembled Learned Multi-Step Workflows (${learnedWorkflows.size}):",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (learnedWorkflows.isEmpty()) {
+                Text(
+                    text = "No multi-step learned workflows assembled yet. Tap 'Start Training Session', perform actions (e.g. open YouTube Studio -> Continue to Studio), then tap 'Stop & Assemble'.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                learnedWorkflows.forEach { lWf ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(lWf.name, fontWeight = FontWeight.Bold)
+                                    Text("Status: ${lWf.status} | Confidence: ${lWf.confidence}", style = MaterialTheme.typography.bodySmall)
+                                    Text("Successes: ${lWf.successCount} | Failures: ${lWf.failureCount}", style = MaterialTheme.typography.bodySmall)
+                                }
+
+                                TextButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                learnedWfDao.deleteWorkflow(lWf.id)
+                                                learnedWfDao.deleteStepsForWorkflow(lWf.id)
+                                            }
+                                            statusText = "Deleted learned workflow '${lWf.name}'"
+                                        }
+                                    }
+                                ) {
+                                    Text("Delete", color = Color(0xFFC62828), fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }
@@ -658,6 +722,7 @@ fun CreatorAutomationScreen(context: Context) {
                     Text("Active Package: ${activePackageName ?: "Unknown"}", fontWeight = FontWeight.SemiBold)
                     Text("Last Event: $lastAccessibilityEvent", style = MaterialTheme.typography.bodySmall)
                     Text("Learning Mode: ${currentLearningMode.name}", style = MaterialTheme.typography.bodySmall)
+                    Text("Training Session: ${if (isTrainingActive) "ACTIVE" else "INACTIVE"}", style = MaterialTheme.typography.bodySmall)
                     Text("Autonomous Replay: ${if (globalAutonomousEnabled) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
 
                     Spacer(modifier = Modifier.height(8.dp))

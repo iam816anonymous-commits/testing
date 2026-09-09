@@ -99,7 +99,6 @@ class AutomationAccessibilityService : AccessibilityService() {
                     dao.insertRecord(updated)
                     Log.i(TAG, "DEMONSTRATION_UPDATED: Updated '${clickedText}' count to ${updated.demonstrationCount}")
                 } else {
-                    // Check if conflicting action exists for same state
                     val hasConflict = existingRecords.any { it.targetText != clickedText }
                     val newRecord = DemonstrationRecord(
                         packageName = packageName,
@@ -112,6 +111,14 @@ class AutomationAccessibilityService : AccessibilityService() {
                     )
                     dao.insertRecord(newRecord)
                     Log.i(TAG, "DEMONSTRATION_RECORDED: Saved new transition for '${clickedText}' (Ambiguous: $hasConflict)")
+                }
+
+                // Delegate to TrainingSessionManager if an active session exists
+                val sessionManager = TrainingSessionManager.instance
+                    ?: TrainingSessionManager(db.learnedWorkflowDao()).also { TrainingSessionManager.instance }
+
+                if (TrainingSessionManager.isTrainingActive.value) {
+                    sessionManager.recordObservedAction(snapshot, ActionType.CLICK_TEXT.name, clickedText)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error recording user demonstration", e)

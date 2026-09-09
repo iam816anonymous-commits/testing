@@ -11,7 +11,8 @@ class WorkflowEngine(
         AppDatabase.getDatabase(context).demonstrationDao()
     ),
     private val deviceActionExecutor: DeviceActionExecutor = DeviceActionExecutor(context, actionResolver),
-    private val autonomousGate: AutonomousExecutionGate = AutonomousExecutionGate()
+    private val autonomousGate: AutonomousExecutionGate = AutonomousExecutionGate(),
+    private val learnedWorkflowEngine: LearnedWorkflowEngine = LearnedWorkflowEngine(context, AppDatabase.getDatabase(context).learnedWorkflowDao(), deviceActionExecutor, autonomousGate)
 ) {
 
     companion object {
@@ -56,40 +57,56 @@ class WorkflowEngine(
                 if (step.action.type == ActionType.EXECUTE_LEARNED_DECISION) {
                     val root = service.getRootNode()
                     val snapshot = ActionResolver.captureSnapshot(root, service.packageName ?: "")
-                    val proposed = learnedDecisionResolver.resolveDecision(snapshot, globalAutonomousEnabled)
+                    val stateSig = StateSignatureGenerator.generateSignature(snapshot)
 
-                    val gateEval = autonomousGate.evaluate(
-                        learningMode = AutomationAccessibilityService.currentLearningMode.value,
-                        globalAutonomousEnabled = globalAutonomousEnabled,
-                        proposedDecision = proposed
-                    )
+                    // First, check if a multi-step LearnedWorkflow exists for current state
+                    val dao = AppDatabase.getDatabase(context).learnedWorkflowDao()
+                    val candidateWorkflows = dao.getWorkflowsForStartingState(stateSig)
 
-                    if (!gateEval.allowed) {
-                        Log.i(TAG, "AUTONOMOUS_GATE_REJECTED: ${gateEval.explanation}")
-                        stepResult = ActionResult(
-                            status = ActionResultStatus.SUCCESS,
-                            reason = ExecutionReason.LEARNING_REQUIRED,
+                    if (candidateWorkflows.isNotEmpty() && globalAutonomousEnabled) {
+                        val learnedWf = candidateWorkflows.first()
+                        Log.i(TAG, "EXECUTING_MULTI_STEP_LEARNED_WORKFLOW: Found '${learnedWf.name}' for state $stateSig")
+                        stepResult = learnedWorkflowEngine.executeLearnedWorkflow(
+                            learnedWorkflow = learnedWf,
+                            service = service,
                             trigger = trigger,
-                            message = gateEval.explanation,
-                            snapshot = snapshot
+                            globalAutonomousEnabled = globalAutonomousEnabled
                         )
-                        break
-                    }
-
-                    stepResult = deviceActionExecutor.executeAndAudit(
-                        workflowId = workflow.id,
-                        action = proposed!!.action!!,
-                        service = service,
-                        trigger = trigger,
-                        verificationAction = step.verificationAction
-                    )
-
-                    // Update demonstration statistics
-                    val dao = AppDatabase.getDatabase(context).demonstrationDao()
-                    if (stepResult.status == ActionResultStatus.SUCCESS) {
-                        dao.insertRecord(proposed.record.copy(successCount = proposed.record.successCount + 1))
                     } else {
-                        dao.insertRecord(proposed.record.copy(failureCount = proposed.record.failureCount + 1))
+                        // Fallback to single-decision LearnedDecisionResolver
+                        val proposed = learnedDecisionResolver.resolveDecision(snapshot, globalAutonomousEnabled)
+                        val gateEval = autonomousGate.evaluate(
+                            learningMode = AutomationAccessibilityService.currentLearningMode.value,
+                            globalAutonomousEnabled = globalAutonomousEnabled,
+                            proposedDecision = proposed
+                        )
+
+                        if (!gateEval.allowed) {
+                            Log.i(TAG, "AUTONOMOUS_GATE_REJECTED: ${gateEval.explanation}")
+                            stepResult = ActionResult(
+                                status = ActionResultStatus.SUCCESS,
+                                reason = ExecutionReason.LEARNING_REQUIRED,
+                                trigger = trigger,
+                                message = gateEval.explanation,
+                                snapshot = snapshot
+                            )
+                            break
+                        }
+
+                        stepResult = deviceActionExecutor.executeAndAudit(
+                            workflowId = workflow.id,
+                            action = proposed!!.action!!,
+                            service = service,
+                            trigger = trigger,
+                            verificationAction = step.verificationAction
+                        )
+
+                        val demoDao = AppDatabase.getDatabase(context).demonstrationDao()
+                        if (stepResult.status == ActionResultStatus.SUCCESS) {
+                            demoDao.insertRecord(proposed.record.copy(successCount = proposed.record.successCount + 1))
+                        } else {
+                            demoDao.insertRecord(proposed.record.copy(failureCount = proposed.record.failureCount + 1))
+                        }
                     }
                 } else {
                     stepResult = deviceActionExecutor.executeAndAudit(
