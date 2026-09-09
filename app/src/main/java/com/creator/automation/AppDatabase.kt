@@ -9,9 +9,10 @@ import androidx.room.RoomDatabase
     entities = [
         AutomationObservation::class,
         WorkflowSchedule::class,
-        DemonstrationRecord::class
+        DemonstrationRecord::class,
+        ActionAuditRecord::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,6 +20,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun observationDao(): AutomationObservationDao
     abstract fun scheduleDao(): WorkflowScheduleDao
     abstract fun demonstrationDao(): DemonstrationDao
+    abstract fun actionAuditDao(): ActionAuditDao
 
     companion object {
         @Volatile

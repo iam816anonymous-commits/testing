@@ -67,6 +67,7 @@ fun CreatorAutomationScreen(context: Context) {
     val obsDao = db.observationDao()
     val scheduleDao = db.scheduleDao()
     val demoDao = db.demonstrationDao()
+    val auditDao = db.actionAuditDao()
     val scheduler = remember { AutomationScheduler(context, scheduleDao) }
 
     val observationsFlow = remember { obsDao.getAllObservations() }
@@ -77,6 +78,9 @@ fun CreatorAutomationScreen(context: Context) {
 
     val demonstrationsFlow = remember { demoDao.getAllRecordsFlow() }
     val demonstrations by demonstrationsFlow.collectAsState(initial = emptyList())
+
+    val auditRecordsFlow = remember { auditDao.getAllAuditRecordsFlow() }
+    val auditRecords by auditRecordsFlow.collectAsState(initial = emptyList())
 
     val workflowsState = remember { mutableStateMapOf<String, Boolean>() }
     LaunchedEffect(Unit) {
@@ -96,7 +100,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.4",
+            text = "Creator Automation V0.5",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -668,6 +672,20 @@ fun CreatorAutomationScreen(context: Context) {
                         Text(
                             "• ${sched.workflowId}: Enabled=${sched.enabled}, NextRun=$nextRunStr",
                             style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Recent Action Audits (${auditRecords.size}):", fontWeight = FontWeight.Bold)
+                    auditRecords.take(3).forEach { audit ->
+                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(audit.timestamp))
+                        Text(
+                            "[$timeStr] ${audit.actionType} -> Target: '${audit.targetIdentifier ?: "N/A"}' | Success: ${audit.success} | Verification: ${audit.verificationStatus} | Change: ${audit.stateChangeResult}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp
                         )
                     }
 
