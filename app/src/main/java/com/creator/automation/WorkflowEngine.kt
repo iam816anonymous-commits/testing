@@ -12,11 +12,75 @@ class WorkflowEngine(
     ),
     private val deviceActionExecutor: DeviceActionExecutor = DeviceActionExecutor(context, actionResolver),
     private val autonomousGate: AutonomousExecutionGate = AutonomousExecutionGate(),
-    private val learnedWorkflowEngine: LearnedWorkflowEngine = LearnedWorkflowEngine(context, AppDatabase.getDatabase(context).learnedWorkflowDao(), deviceActionExecutor, autonomousGate)
+    private val learnedWorkflowEngine: LearnedWorkflowEngine = LearnedWorkflowEngine(context, AppDatabase.getDatabase(context).learnedWorkflowDao(), deviceActionExecutor, autonomousGate),
+    private val taskResolver: TaskResolver = TaskResolver(AppDatabase.getDatabase(context).learnedWorkflowDao()),
+    private val taskReasoner: TaskReasoner = TaskReasoner(context, deviceActionExecutor, AppDatabase.getDatabase(context).learnedWorkflowDao())
 ) {
 
     companion object {
         private const val TAG = "WorkflowEngine"
+    }
+
+    suspend fun resolveAndExecuteTask(
+        taskDescription: String,
+        service: AutomationAccessibilityService? = AutomationAccessibilityService.instance,
+        trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
+        globalAutonomousEnabled: Boolean = true
+    ): ActionResult {
+        Log.i(TAG, "RESOLVING_AND_EXECUTING_TASK: '$taskDescription'")
+
+        if (service == null) {
+            return ActionResult(
+                status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.ACCESSIBILITY_DISABLED,
+                trigger = trigger,
+                message = "AccessibilityService is disabled or not running."
+            )
+        }
+
+        val root = service.getRootNode()
+        val currentSnapshot = ActionResolver.captureSnapshot(root, service.packageName ?: "")
+
+        val resolution = taskResolver.resolveTask(taskDescription, currentSnapshot)
+
+        // Save TaskRecord in database
+        val taskDao = AppDatabase.getDatabase(context).taskDao()
+        taskDao.insertTask(resolution.taskRecord)
+
+        return when (resolution.source) {
+            TaskSource.LEARNED_WORKFLOW -> {
+                learnedWorkflowEngine.executeLearnedWorkflow(
+                    learnedWorkflow = resolution.learnedWorkflow!!,
+                    service = service,
+                    trigger = trigger,
+                    globalAutonomousEnabled = globalAutonomousEnabled
+                )
+            }
+            TaskSource.LOCAL_RULE -> {
+                executeWorkflow(
+                    workflow = resolution.localWorkflow!!,
+                    service = service,
+                    trigger = trigger,
+                    globalAutonomousEnabled = globalAutonomousEnabled
+                )
+            }
+            TaskSource.CHATGPT -> {
+                val plan = resolution.reasoningPlan!!
+                taskReasoner.executeReasoningPlan(
+                    plan = plan,
+                    service = service,
+                    trigger = trigger
+                )
+            }
+            else -> {
+                ActionResult(
+                    status = ActionResultStatus.BLOCKED,
+                    reason = ExecutionReason.LEARNING_REQUIRED,
+                    trigger = trigger,
+                    message = "Task unresolved or reasoning provider unavailable."
+                )
+            }
+        }
     }
 
     suspend fun executeWorkflow(

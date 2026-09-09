@@ -60,6 +60,7 @@ fun CreatorAutomationScreen(context: Context) {
     val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
 
     var customUrl by remember { mutableStateOf("") }
+    var userTaskInput by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("Ready") }
     var selectedTab by remember { mutableIntStateOf(0) }
     var globalAutonomousEnabled by remember { mutableStateOf(true) }
@@ -70,6 +71,7 @@ fun CreatorAutomationScreen(context: Context) {
     val demoDao = db.demonstrationDao()
     val auditDao = db.actionAuditDao()
     val learnedWfDao = db.learnedWorkflowDao()
+    val taskDao = db.taskDao()
     val scheduler = remember { AutomationScheduler(context, scheduleDao) }
     val sessionManager = remember { TrainingSessionManager(learnedWfDao) }
 
@@ -84,6 +86,9 @@ fun CreatorAutomationScreen(context: Context) {
 
     val learnedWorkflowsFlow = remember { learnedWfDao.getAllWorkflowsFlow() }
     val learnedWorkflows by learnedWorkflowsFlow.collectAsState(initial = emptyList())
+
+    val taskRecordsFlow = remember { taskDao.getAllTasksFlow() }
+    val taskRecords by taskRecordsFlow.collectAsState(initial = emptyList())
 
     val auditRecordsFlow = remember { auditDao.getAllAuditRecordsFlow() }
     val auditRecords by auditRecordsFlow.collectAsState(initial = emptyList())
@@ -106,7 +111,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.6",
+            text = "Creator Automation V0.7",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -180,7 +185,51 @@ fun CreatorAutomationScreen(context: Context) {
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedTab == 0) {
-            // Automation Tab
+            // Task Entry & Reasoning Section
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Task Reasoning & Agent Solver", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = userTaskInput,
+                        onValueChange = { userTaskInput = it },
+                        label = { Text("Enter Task Description") },
+                        placeholder = { Text("Find analytics for my latest Short") },
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            if (userTaskInput.isNotBlank()) {
+                                coroutineScope.launch {
+                                    val taskDesc = userTaskInput.trim()
+                                    statusText = "Resolving & executing task: '$taskDesc'..."
+                                    val engine = WorkflowEngine(context)
+                                    val result = engine.resolveAndExecuteTask(
+                                        taskDescription = taskDesc,
+                                        globalAutonomousEnabled = globalAutonomousEnabled
+                                    )
+                                    statusText = "Task Result: ${result.status} (${result.message})"
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Run Task (TaskResolver)")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Automation Tab Workflows
             Text(
                 text = "Automation Workflows",
                 style = MaterialTheme.typography.titleMedium,
@@ -724,6 +773,19 @@ fun CreatorAutomationScreen(context: Context) {
                     Text("Learning Mode: ${currentLearningMode.name}", style = MaterialTheme.typography.bodySmall)
                     Text("Training Session: ${if (isTrainingActive) "ACTIVE" else "INACTIVE"}", style = MaterialTheme.typography.bodySmall)
                     Text("Autonomous Replay: ${if (globalAutonomousEnabled) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Resolved Tasks History (${taskRecords.size}):", fontWeight = FontWeight.Bold)
+                    taskRecords.take(3).forEach { tRecord ->
+                        Text(
+                            "• '${tRecord.description}' -> ${tRecord.status} (Source: ${tRecord.source}, Reason: ${tRecord.resolutionReason})",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(8.dp))
                     HorizontalDivider()
