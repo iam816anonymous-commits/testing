@@ -59,6 +59,9 @@ fun CreatorAutomationScreen(context: Context) {
     val currentLearningMode by AutomationAccessibilityService.currentLearningMode.collectAsState()
     val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
 
+    val agentState by AgentCore.agentState.collectAsState()
+    val recentAgentLogs by AgentCore.recentAgentLogs.collectAsState()
+
     var customUrl by remember { mutableStateOf("") }
     var userTaskInput by remember { mutableStateOf("") }
     var statusText by remember { mutableStateOf("Ready") }
@@ -74,6 +77,8 @@ fun CreatorAutomationScreen(context: Context) {
     val taskDao = db.taskDao()
     val scheduler = remember { AutomationScheduler(context, scheduleDao) }
     val sessionManager = remember { TrainingSessionManager(learnedWfDao) }
+    val agentCore = remember { AgentCore(context) }
+    val capabilityProbe = remember { DeviceCapabilityProbe(context) }
 
     val observationsFlow = remember { obsDao.getAllObservations() }
     val observations by observationsFlow.collectAsState(initial = emptyList())
@@ -111,7 +116,7 @@ fun CreatorAutomationScreen(context: Context) {
     ) {
 
         Text(
-            text = "Creator Automation V0.7",
+            text = "Creator Automation V0.8",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -123,16 +128,21 @@ fun CreatorAutomationScreen(context: Context) {
             Tab(
                 selected = selectedTab == 0,
                 onClick = { selectedTab = 0 },
-                text = { Text("Automation") }
+                text = { Text("Agent Core") }
             )
             Tab(
                 selected = selectedTab == 1,
                 onClick = { selectedTab = 1 },
-                text = { Text("Learning") }
+                text = { Text("Workflows") }
             )
             Tab(
                 selected = selectedTab == 2,
                 onClick = { selectedTab = 2 },
+                text = { Text("Learning") }
+            )
+            Tab(
+                selected = selectedTab == 3,
+                onClick = { selectedTab = 3 },
                 text = { Text("Diagnostics") }
             )
         }
@@ -167,7 +177,7 @@ fun CreatorAutomationScreen(context: Context) {
                 if (!isAccessibilityEnabled) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "To enable automation & learning, tap below, locate 'Creator Automation' in Accessibility settings, and toggle it ON.",
+                        text = "To enable agent automation & learning, tap below, locate 'Creator Automation' in Accessibility settings, and toggle it ON.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -185,13 +195,61 @@ fun CreatorAutomationScreen(context: Context) {
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedTab == 0) {
-            // Task Entry & Reasoning Section
+            // Agent Core Tab
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Agent Loop Status: ${agentState.name}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                agentCore.resumeAgent()
+                                statusText = "Agent Resumed / IDLE"
+                            }
+                        ) {
+                            Text("Resume", fontSize = 11.sp)
+                        }
+
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                agentCore.pauseAgent()
+                                statusText = "Agent Paused"
+                            }
+                        ) {
+                            Text("Pause", fontSize = 11.sp)
+                        }
+
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                agentCore.cancelAgent()
+                                statusText = "Agent Task Cancelled"
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                        ) {
+                            Text("Cancel", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Task Reasoning & Agent Solver", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text("Autonomous Agent Task Solver", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(8.dp))
 
                     OutlinedTextField(
@@ -210,26 +268,36 @@ fun CreatorAutomationScreen(context: Context) {
                             if (userTaskInput.isNotBlank()) {
                                 coroutineScope.launch {
                                     val taskDesc = userTaskInput.trim()
-                                    statusText = "Resolving & executing task: '$taskDesc'..."
-                                    val engine = WorkflowEngine(context)
-                                    val result = engine.resolveAndExecuteTask(
+                                    statusText = "AgentCore executing task: '$taskDesc'..."
+                                    val stepRes = agentCore.executeTaskStep(
                                         taskDescription = taskDesc,
                                         globalAutonomousEnabled = globalAutonomousEnabled
                                     )
-                                    statusText = "Task Result: ${result.status} (${result.message})"
+                                    statusText = "Agent Loop State: ${stepRes.nextState} (${stepRes.decisionReason})"
                                 }
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Run Task (TaskResolver)")
+                        Text("Execute Task via Agent Core")
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Automation Tab Workflows
+            Text("Recent Agent Activity Log:", fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            if (recentAgentLogs.isEmpty()) {
+                Text("No agent loop activity recorded yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                recentAgentLogs.forEach { logLine ->
+                    Text(logLine, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+                }
+            }
+
+        } else if (selectedTab == 1) {
+            // Automation Workflows Tab
             Text(
                 text = "Automation Workflows",
                 style = MaterialTheme.typography.titleMedium,
@@ -283,7 +351,6 @@ fun CreatorAutomationScreen(context: Context) {
                         HorizontalDivider()
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Schedule Controls
                         Text("Automatic Schedule (WorkManager):", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
 
                         Row(
@@ -388,24 +455,6 @@ fun CreatorAutomationScreen(context: Context) {
                                 onClick = {
                                     coroutineScope.launch {
                                         statusText = "Executing '${workflow.name}' (Manual)..."
-                                        if (!isAccessibilityEnabled) {
-                                            statusText = "BLOCKED: AccessibilityService disabled"
-                                            withContext(Dispatchers.IO) {
-                                                obsDao.insertObservation(
-                                                    AutomationObservation(
-                                                        workflowId = workflow.id,
-                                                        packageName = workflow.targetPackage ?: "unknown",
-                                                        result = ActionResultStatus.BLOCKED.name,
-                                                        reason = ExecutionReason.ACCESSIBILITY_DISABLED.name,
-                                                        executionTrigger = ExecutionTrigger.MANUAL.name,
-                                                        visibleTextSummary = "AccessibilityService disabled",
-                                                        errorMessage = "AccessibilityService is disabled."
-                                                    )
-                                                )
-                                            }
-                                            return@launch
-                                        }
-
                                         val engine = WorkflowEngine(context)
                                         val result = engine.executeWorkflow(
                                             workflow = workflow,
@@ -443,7 +492,6 @@ fun CreatorAutomationScreen(context: Context) {
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Quick Launchers Section
             Text(
                 text = "Quick Launchers",
                 style = MaterialTheme.typography.titleMedium,
@@ -458,30 +506,21 @@ fun CreatorAutomationScreen(context: Context) {
             ) {
                 Button(
                     modifier = Modifier.weight(1f),
-                    onClick = {
-                        openUrl(context, "https://chatgpt.com/")
-                        statusText = "Opened ChatGPT"
-                    }
+                    onClick = { openUrl(context, "https://chatgpt.com/"); statusText = "Opened ChatGPT" }
                 ) {
                     Text("ChatGPT", fontSize = 12.sp)
                 }
 
                 Button(
                     modifier = Modifier.weight(1f),
-                    onClick = {
-                        openUrl(context, "https://www.youtube.com/")
-                        statusText = "Opened YouTube"
-                    }
+                    onClick = { openUrl(context, "https://www.youtube.com/"); statusText = "Opened YouTube" }
                 ) {
                     Text("YouTube", fontSize = 12.sp)
                 }
 
                 Button(
                     modifier = Modifier.weight(1f),
-                    onClick = {
-                        openUrl(context, "https://studio.youtube.com/")
-                        statusText = "Opened YouTube Studio"
-                    }
+                    onClick = { openUrl(context, "https://studio.youtube.com/"); statusText = "Opened YouTube Studio" }
                 ) {
                     Text("Studio", fontSize = 12.sp)
                 }
@@ -500,57 +539,25 @@ fun CreatorAutomationScreen(context: Context) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
+            Button(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        if (customUrl.isNotBlank()) {
-                            var finalUrl = customUrl.trim()
-                            if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-                                finalUrl = "https://$finalUrl"
-                            }
-                            openUrl(context, finalUrl)
-                            statusText = "Opened $finalUrl"
+                onClick = {
+                    if (customUrl.isNotBlank()) {
+                        var finalUrl = customUrl.trim()
+                        if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
+                            finalUrl = "https://$finalUrl"
                         }
+                        openUrl(context, finalUrl)
+                        statusText = "Opened $finalUrl"
                     }
-                ) {
-                    Text("Open URL")
                 }
+            ) {
+                Text("Open URL")
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(text = "Status: $statusText", fontWeight = FontWeight.Bold)
-
-            if (observations.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Recent Execution Observations (${observations.size}):",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-
-                observations.take(5).forEach { obs ->
-                    val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(obs.timestamp))
-                    Text(
-                        text = "[$timeStr] [${obs.executionTrigger}] ${obs.workflowId} -> ${obs.result} (${obs.reason}) - ${obs.visibleTextSummary.take(30)}...",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 11.sp
-                    )
-                }
-            }
-        } else if (selectedTab == 1) {
-            // Learning & Demonstrations Tab
-            Text(
-                text = "Demonstration Learning Controls",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-
+        } else if (selectedTab == 2) {
+            // Learning Tab
+            Text("Demonstration Learning Controls", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
 
             Card(
@@ -590,7 +597,7 @@ fun CreatorAutomationScreen(context: Context) {
                             enabled = !isTrainingActive,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
                         ) {
-                            Text("Start Training Session", fontSize = 11.sp)
+                            Text("Start Session", fontSize = 11.sp)
                         }
 
                         Button(
@@ -612,40 +619,23 @@ fun CreatorAutomationScreen(context: Context) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "Assembled Learned Multi-Step Workflows (${learnedWorkflows.size}):",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold
-            )
-
+            Text("Assembled Learned Multi-Step Workflows (${learnedWorkflows.size}):", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
 
             if (learnedWorkflows.isEmpty()) {
-                Text(
-                    text = "No multi-step learned workflows assembled yet. Tap 'Start Training Session', perform actions (e.g. open YouTube Studio -> Continue to Studio), then tap 'Stop & Assemble'.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("No multi-step learned workflows assembled yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 learnedWorkflows.forEach { lWf ->
                     Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(lWf.name, fontWeight = FontWeight.Bold)
                                     Text("Status: ${lWf.status} | Confidence: ${lWf.confidence}", style = MaterialTheme.typography.bodySmall)
-                                    Text("Successes: ${lWf.successCount} | Failures: ${lWf.failureCount}", style = MaterialTheme.typography.bodySmall)
                                 }
-
                                 TextButton(
                                     onClick = {
                                         coroutineScope.launch {
@@ -653,7 +643,7 @@ fun CreatorAutomationScreen(context: Context) {
                                                 learnedWfDao.deleteWorkflow(lWf.id)
                                                 learnedWfDao.deleteStepsForWorkflow(lWf.id)
                                             }
-                                            statusText = "Deleted learned workflow '${lWf.name}'"
+                                            statusText = "Deleted '${lWf.name}'"
                                         }
                                     }
                                 ) {
@@ -664,86 +654,45 @@ fun CreatorAutomationScreen(context: Context) {
                     }
                 }
             }
+        } else {
+            // Diagnostics & Device Capabilities Tab
+            Text("Physical Device Diagnostics & Capabilities", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val probeResult = remember { capabilityProbe.probeCapabilities() }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Device Info: Android ${probeResult.androidVersion} (API ${probeResult.apiLevel})", fontWeight = FontWeight.Bold)
+                    Text("ABI: ${probeResult.cpuAbi}", style = MaterialTheme.typography.bodySmall)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Capability Probe Reports:", fontWeight = FontWeight.Bold)
+                    probeResult.reports.forEach { rep ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("• ${rep.capability.name}:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Text(
+                                rep.state.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = when (rep.state) {
+                                    CapabilityState.AVAILABLE -> Color(0xFF2E7D32)
+                                    CapabilityState.NOT_GRANTED -> Color(0xFFE65100)
+                                    else -> Color(0xFFC62828)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Learned Transitions (${demonstrations.size}):",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
-
-                if (demonstrations.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                withContext(Dispatchers.IO) {
-                                    demoDao.deleteAllRecords()
-                                }
-                                statusText = "Cleared all learned demonstration records"
-                            }
-                        }
-                    ) {
-                        Text("Clear All", color = Color(0xFFC62828), fontSize = 12.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (demonstrations.isEmpty()) {
-                Text(
-                    text = "No user demonstrations recorded yet. Enable 'Training Mode' and open YouTube Studio to record choice selections (e.g. 'Continue to Studio').",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                demonstrations.forEach { record ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Pkg: ${record.packageName.substringAfterLast(".")}", fontWeight = FontWeight.Bold)
-                                Text(
-                                    "Confidence: ${record.confidenceLevel}",
-                                    fontWeight = FontWeight.Bold,
-                                    color = when (record.confidenceLevel) {
-                                        "HIGH" -> Color(0xFF2E7D32)
-                                        "MEDIUM" -> Color(0xFF1565C0)
-                                        else -> Color(0xFFE65100)
-                                    }
-                                )
-                            }
-                            Text("Action: ${record.actionType} -> '${record.targetText}'", style = MaterialTheme.typography.bodySmall)
-                            Text("Demos: ${record.demonstrationCount} | Successes: ${record.successCount} | Failures: ${record.failureCount}", style = MaterialTheme.typography.bodySmall)
-                            if (record.isAmbiguous) {
-                                Text("⚠️ Conflicting choices detected for state", color = Color(0xFFC62828), fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            // Physical Device Diagnostic Tab
-            Text(
-                text = "Physical Device Diagnostics",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
 
             var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
 
@@ -761,81 +710,15 @@ fun CreatorAutomationScreen(context: Context) {
                 Text("Capture Live UI Snapshot")
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Active Package: ${activePackageName ?: "Unknown"}", fontWeight = FontWeight.SemiBold)
-                    Text("Last Event: $lastAccessibilityEvent", style = MaterialTheme.typography.bodySmall)
-                    Text("Learning Mode: ${currentLearningMode.name}", style = MaterialTheme.typography.bodySmall)
-                    Text("Training Session: ${if (isTrainingActive) "ACTIVE" else "INACTIVE"}", style = MaterialTheme.typography.bodySmall)
-                    Text("Autonomous Replay: ${if (globalAutonomousEnabled) "ON" else "OFF"}", style = MaterialTheme.typography.bodySmall)
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text("Resolved Tasks History (${taskRecords.size}):", fontWeight = FontWeight.Bold)
-                    taskRecords.take(3).forEach { tRecord ->
-                        Text(
-                            "• '${tRecord.description}' -> ${tRecord.status} (Source: ${tRecord.source}, Reason: ${tRecord.resolutionReason})",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text("Active Schedules (${schedules.size}):", fontWeight = FontWeight.Bold)
-                    schedules.forEach { sched ->
-                        val nextRunStr = if (sched.nextExpectedRunTimestamp > 0) {
-                            SimpleDateFormat("HH:mm:ss dd/MM", Locale.getDefault()).format(Date(sched.nextExpectedRunTimestamp))
-                        } else "N/A"
-                        Text(
-                            "• ${sched.workflowId}: Enabled=${sched.enabled}, NextRun=$nextRunStr",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text("Recent Action Audits (${auditRecords.size}):", fontWeight = FontWeight.Bold)
-                    auditRecords.take(3).forEach { audit ->
-                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(audit.timestamp))
-                        Text(
-                            "[$timeStr] ${audit.actionType} -> Target: '${audit.targetIdentifier ?: "N/A"}' | Success: ${audit.success} | Verification: ${audit.verificationStatus} | Change: ${audit.stateChangeResult}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (currentSnapshot != null) {
-                        val snap = currentSnapshot!!
-                        val stateSig = StateSignatureGenerator.generateSignature(snap)
+            if (currentSnapshot != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                val snap = currentSnapshot!!
+                val stateSig = StateSignatureGenerator.generateSignature(snap)
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text("Snapshot Details:", fontWeight = FontWeight.Bold)
-                        Text("State Signature: $stateSig", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        Text("Total Nodes: ${snap.totalNodeCount}")
-                        Text("Visible Nodes: ${snap.visibleNodeCount}")
-                        Text("Clickable Nodes: ${snap.clickableNodeCount}")
-                        Text("Scrollable Nodes: ${snap.scrollableNodeCount}")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Visible Text Sample:\n${snap.visibleTexts.take(8).joinToString("\n• ", prefix = "• ")}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    } else {
-                        Text("Tap 'Capture Live UI Snapshot' to inspect foreground screen state.", style = MaterialTheme.typography.bodySmall)
+                        Text("State Signature: $stateSig", fontSize = 12.sp)
+                        Text("Nodes: Total=${snap.totalNodeCount}, Visible=${snap.visibleNodeCount}, Clickable=${snap.clickableNodeCount}")
                     }
                 }
             }
