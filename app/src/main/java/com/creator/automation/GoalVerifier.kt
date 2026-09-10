@@ -3,6 +3,11 @@ package com.creator.automation
 import android.util.Log
 
 enum class GoalVerificationStatus {
+    GOAL_REACHED,
+    GOAL_NOT_REACHED,
+    PROGRESSING,
+    BLOCKED,
+    UNKNOWN,
     GOAL_VERIFIED,
     GOAL_TEXT_NOT_FOUND,
     WRONG_PACKAGE,

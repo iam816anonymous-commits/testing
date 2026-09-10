@@ -7,11 +7,26 @@ enum class WorldStateFreshness {
     UNAVAILABLE
 }
 
+/**
+ * WorldState represents a compact, state-based snapshot of current reality on the Android device.
+ *
+ * Field Taxonomy:
+ * - AUTHORITATIVE: Live system metadata (packageName, screenSignature, uiTreeSignature, isAccessibilityAvailable, timestamp, freshness).
+ * - DERIVED: Dynamic properties extracted from snapshot (visibleTexts, clickableTargets, editableTargets, focusedTarget, scrollableContainers, controls counts).
+ * - CACHED: Snapshot reference and previous signature (snapshot, previousStateSignature).
+ * - STALE-PRONE: Temporal execution metadata (recentActionType, recentActionResult, recentFailureReason).
+ */
 data class WorldState(
+    // AUTHORITATIVE FIELDS
     val packageName: String = "unknown",
     val activeWindow: String? = null,
     val screenSignature: String = "acc_disabled",
     val uiTreeSignature: String = "",
+    val isAccessibilityAvailable: Boolean = false,
+    val timestamp: Long = System.currentTimeMillis(),
+    val freshness: WorldStateFreshness = WorldStateFreshness.UNKNOWN,
+
+    // DERIVED FIELDS
     val visibleTexts: List<String> = emptyList(),
     val contentDescriptions: List<String> = emptyList(),
     val viewIds: List<String> = emptyList(),
@@ -23,9 +38,8 @@ data class WorldState(
     val disabledControlsCount: Int = 0,
     val isKeyboardVisible: Boolean = false,
     val hasDialogOrPopup: Boolean = false,
-    val isAccessibilityAvailable: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis(),
-    val freshness: WorldStateFreshness = WorldStateFreshness.UNKNOWN,
+
+    // CACHED & TEMPORAL STALE-PRONE FIELDS
     val previousStateSignature: String? = null,
     val recentActionType: String? = null,
     val recentActionResult: ActionResultStatus? = null,
