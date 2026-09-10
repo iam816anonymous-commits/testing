@@ -423,30 +423,63 @@ class DeviceActionExecutor(
     }
 
     private fun performPressEnter(service: AutomationAccessibilityService, snapshot: UiSnapshot): ActionResult {
-        // 1. Try finding visible Search / Enter / Go button on UI
-        for (btnText in listOf("Search", "Go", "Enter", "Submit")) {
+        // 1. Try finding explicit search/submit/enter buttons in UI (e.g., "Search", "Go", "Enter", "Submit", "Search or type web address")
+        val searchCandidates = listOf("Search", "Go", "Enter", "Submit", "Search or type web address")
+        val matchingNodes = mutableListOf<UiNodeInfo>()
+
+        for (btnText in searchCandidates) {
             val searchButtonRes = actionResolver.resolveTargetWithAmbiguity(snapshot, btnText)
-            if (searchButtonRes.match != null && !searchButtonRes.isAmbiguous) {
-                val nodeRef = searchButtonRes.match.node.nodeRef as? AccessibilityNodeInfo
-                if (nodeRef != null) {
-                    var targetNode: AccessibilityNodeInfo? = nodeRef
-                    while (targetNode != null && !targetNode.isClickable) {
-                        targetNode = targetNode.parent
-                    }
-                    if (targetNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
-                        return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = searchButtonRes.match.node, matchMethod = "SEARCH_BUTTON_CLICK")
-                    }
+            if (searchButtonRes.match != null) {
+                matchingNodes.add(searchButtonRes.match.node)
+            }
+        }
+
+        val distinctMatches = matchingNodes.distinctBy { it.boundsInScreen ?: it.text }
+        if (distinctMatches.size > 1) {
+            Log.w(TAG, "PRESS_ENTER_AMBIGUOUS: Found ${distinctMatches.size} search/submit candidates. Execution blocked for safety.")
+            return ActionResult(
+                status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.AMBIGUOUS_TARGET,
+                message = "Multiple candidate search/submit controls (${distinctMatches.size}) found on screen"
+            )
+        }
+
+        if (distinctMatches.size == 1) {
+            val best = distinctMatches.first()
+            val nodeRef = best.nodeRef as? AccessibilityNodeInfo
+            if (nodeRef != null) {
+                var targetNode: AccessibilityNodeInfo? = nodeRef
+                while (targetNode != null && !targetNode.isClickable) {
+                    targetNode = targetNode.parent
+                }
+                if (targetNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
+                    Log.i(TAG, "PRESS_ENTER_SUBMITTED: Clicked search/submit control '${best.text ?: best.contentDescription}'")
+                    return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = best, matchMethod = "SEARCH_BUTTON_CLICK")
                 }
             }
         }
 
-        // 2. Fallback to IME search or clicking focused view
-        val focusedNode = snapshot.focusedNodes.firstOrNull()?.nodeRef as? AccessibilityNodeInfo
-        if (focusedNode != null && !focusedNode.isEditable) {
-            focusedNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        // 2. Focused editable node submission: Click or perform focus action
+        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable }
+            ?: snapshot.editableNodes.firstOrNull()
+
+        if (focusedEditable != null) {
+            val editableNode = focusedEditable.nodeRef as? AccessibilityNodeInfo
+            if (editableNode != null) {
+                // Focus and perform click to trigger IME submit on keyboard
+                editableNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                editableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.i(TAG, "PRESS_ENTER_SUBMITTED: Performed click on focused editable field to trigger search")
+                return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = focusedEditable, matchMethod = "FOCUSED_EDITABLE_ENTER")
+            }
         }
 
-        return ActionResult(status = ActionResultStatus.SUCCESS, message = "PRESS_ENTER dispatched")
+        Log.w(TAG, "PRESS_ENTER_NO_CONTROL: No clickable submit control or editable field found")
+        return ActionResult(
+            status = ActionResultStatus.FAILED,
+            reason = ExecutionReason.UI_NOT_FOUND,
+            message = "No clickable search/submit control or editable field found to perform enter"
+        )
     }
 
     private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String): ActionResult {

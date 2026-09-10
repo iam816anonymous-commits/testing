@@ -17,7 +17,7 @@ class GenericActionExecutorTest {
     @Before
     fun setUp() {
         mockContext = Mockito.mock(Context::class.java)
-        mockResolver = Mockito.mock(ActionResolver::class.java)
+        mockResolver = ActionResolver()
         mockAuditDao = Mockito.mock(ActionAuditDao::class.java)
     }
 
@@ -39,5 +39,55 @@ class GenericActionExecutorTest {
     fun testExecutionReason_ContainsAppNotInstalledAndAmbiguousApp() {
         assertNotNull(ExecutionReason.valueOf("APP_NOT_INSTALLED"))
         assertNotNull(ExecutionReason.valueOf("AMBIGUOUS_APPLICATION"))
+    }
+
+    @Test
+    fun testMockSearchApp_ResolveSearchControl_SingleUniqueMatch() {
+        val mockSearchAppSnapshot = UiSnapshot(
+            packageName = "com.mock.searchapp",
+            allNodes = listOf(
+                UiNodeInfo(text = "Search Query Field", isEditable = true, isFocused = true),
+                UiNodeInfo(text = "Search", isClickable = true, isEnabled = true)
+            )
+        )
+
+        val res = mockResolver.resolveTargetWithAmbiguity(mockSearchAppSnapshot, "Search")
+
+        assertNotNull(res.match)
+        assertEquals(1, res.candidateCount)
+        assertEquals(TargetResolutionStatus.FOUND_UNIQUE, res.status)
+    }
+
+    @Test
+    fun testMockSearchApp_MultipleSearchControls_AmbiguousTargetBlocked() {
+        val mockAmbiguousSnapshot = UiSnapshot(
+            packageName = "com.mock.searchapp",
+            allNodes = listOf(
+                UiNodeInfo(text = "Search Query Field", isEditable = true),
+                UiNodeInfo(text = "Search", isClickable = true),
+                UiNodeInfo(text = "Search", isClickable = true)
+            )
+        )
+
+        val res = mockResolver.resolveTargetWithAmbiguity(mockAmbiguousSnapshot, "Search")
+
+        assertTrue(res.isAmbiguous)
+        assertEquals(2, res.candidateCount)
+        assertEquals(TargetResolutionStatus.AMBIGUOUS, res.status)
+    }
+
+    @Test
+    fun testMockFormApp_MissingSubmitControl_NotFoundStatus() {
+        val mockFormSnapshot = UiSnapshot(
+            packageName = "com.mock.formapp",
+            allNodes = listOf(
+                UiNodeInfo(text = "Name Field", isEditable = true)
+            )
+        )
+
+        val res = mockResolver.resolveTargetWithAmbiguity(mockFormSnapshot, "Submit")
+
+        assertEquals(TargetResolutionStatus.NOT_FOUND, res.status)
+        assertEquals(0, res.candidateCount)
     }
 }
