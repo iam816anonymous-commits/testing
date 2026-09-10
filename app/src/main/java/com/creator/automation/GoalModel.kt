@@ -12,7 +12,7 @@ enum class GoalStatus {
 data class GoalModel(
     val id: String = java.util.UUID.randomUUID().toString(),
     val rawUserIntent: String, // Trusted user intent
-    val normalizedObjective: String,
+    val normalizedObjective: String = rawUserIntent,
     val targetAppQuery: String? = null,
     val expectedTextInResult: String? = null,
     val maxActionBudget: Int = 10,

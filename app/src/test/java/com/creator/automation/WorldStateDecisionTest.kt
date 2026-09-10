@@ -18,6 +18,7 @@ class WorldStateDecisionTest {
     fun testGoalAlreadySatisfiedDecidesEnd() {
         val goal = GoalModel(
             rawUserIntent = "Open Chrome",
+            normalizedObjective = "Open Chrome",
             targetAppQuery = "chrome",
             expectedTextInResult = "Google"
         )
@@ -35,6 +36,7 @@ class WorldStateDecisionTest {
     fun testActionBudgetExceededDecidesEnd() {
         val goal = GoalModel(
             rawUserIntent = "Search query",
+            normalizedObjective = "Search query",
             currentActionCount = 10,
             maxActionBudget = 10
         )
@@ -49,6 +51,7 @@ class WorldStateDecisionTest {
     fun testAppMismatchDecidesLaunchApp() {
         val goal = GoalModel(
             rawUserIntent = "Open YouTube",
+            normalizedObjective = "Open YouTube",
             targetAppQuery = "youtube"
         )
         val worldState = WorldState(packageName = "com.android.chrome")
@@ -62,6 +65,7 @@ class WorldStateDecisionTest {
     fun testEditableFieldAvailableDecidesTypeText() {
         val goal = GoalModel(
             rawUserIntent = "Search cats",
+            normalizedObjective = "Search cats",
             targetAppQuery = "chrome",
             expectedTextInResult = "cats"
         )
@@ -79,6 +83,7 @@ class WorldStateDecisionTest {
     fun testClickableSearchButtonDecidesClickText() {
         val goal = GoalModel(
             rawUserIntent = "Search query",
+            normalizedObjective = "Search query",
             targetAppQuery = "chrome",
             expectedTextInResult = "movies"
         )
@@ -96,6 +101,7 @@ class WorldStateDecisionTest {
     fun testFallbackDecidesSubmitInput() {
         val goal = GoalModel(
             rawUserIntent = "Search query",
+            normalizedObjective = "Search query",
             targetAppQuery = "chrome",
             expectedTextInResult = "movies"
         )
@@ -107,11 +113,30 @@ class WorldStateDecisionTest {
 
     @Test
     fun testDecisionLayerDoesNotExecuteActions() {
-        val goal = GoalModel(rawUserIntent = "Test intent")
+        val goal = GoalModel(
+            rawUserIntent = "Test intent",
+            normalizedObjective = "Test intent"
+        )
         val worldState = WorldState(packageName = "com.example.test")
 
         val decision = decisionEngine.decideNextAction(goal, worldState)
         assertNotNull(decision)
         assertTrue(decision is ActionDecision)
+    }
+
+    @Test
+    fun testGoalModelParsingAndObjectiveNormalization() {
+        val parsedGoal = GoalModel.parse("  Open Chrome and search for cats  ")
+        assertEquals("Open Chrome and search for cats", parsedGoal.rawUserIntent)
+        assertEquals("Open Chrome and search for cats", parsedGoal.normalizedObjective)
+        assertEquals("Chrome", parsedGoal.targetAppQuery)
+        assertEquals("cats", parsedGoal.expectedTextInResult)
+    }
+
+    @Test
+    fun testGoalModelDefaultNormalizedObjectivePropagation() {
+        val directGoal = GoalModel(rawUserIntent = "Navigate Settings")
+        assertEquals("Navigate Settings", directGoal.rawUserIntent)
+        assertEquals("Navigate Settings", directGoal.normalizedObjective)
     }
 }
