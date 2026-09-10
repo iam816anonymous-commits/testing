@@ -28,25 +28,11 @@ class AppResolver(
 
     companion object {
         private const val TAG = "AppResolver"
-
-        private val WELL_KNOWN_APP_PACKAGES = mapOf(
-            "chrome" to "com.android.chrome",
-            "google chrome" to "com.android.chrome",
-            "youtube" to "com.google.android.youtube",
-            "youtube studio" to "com.google.android.apps.youtube.creator",
-            "studio" to "com.google.android.apps.youtube.creator",
-            "whatsapp" to "com.whatsapp",
-            "chatgpt" to "com.openai.chatgpt",
-            "settings" to "com.android.settings",
-            "camera" to "com.android.camera2",
-            "clock" to "com.android.deskclock",
-            "maps" to "com.google.android.apps.maps",
-            "gmail" to "com.google.android.gm"
-        )
     }
 
     /**
-     * Resolves an app query (name, label, or package) to an installed package and launch intent.
+     * Resolves an app query (name, label, or package) to an installed package and launch intent
+     * dynamically via PackageManager launcher activity discovery without hardcoded package maps.
      */
     fun resolveApplication(query: String): AppResolutionResult {
         if (query.isBlank()) {
@@ -79,34 +65,23 @@ class AppResolver(
             }
         }
 
-        // 2. Check well-known package mapping
-        val knownPackage = WELL_KNOWN_APP_PACKAGES[trimmedQuery]
-        if (knownPackage != null) {
-            if (isPackageInstalled(knownPackage)) {
-                val intent = getLaunchIntentForPackage(knownPackage)
-                val label = getAppLabel(knownPackage)
-                return AppResolutionResult(
-                    status = AppResolutionStatus.SUCCESS,
-                    packageName = knownPackage,
-                    appLabel = label ?: query,
-                    launchIntent = intent,
-                    explanation = "Resolved '$query' via well-known package mapping ($knownPackage)."
-                )
-            }
-        }
-
-        // 3. Dynamic PackageManager scan across installed launcher apps
+        // 2. Dynamic PackageManager scan across installed launcher apps
         val pm = context.packageManager
         val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
 
-        val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
+        val resolveInfos = try {
+            pm.queryIntentActivities(mainIntent, 0) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+
         val matchingApps = mutableListOf<Pair<String, String>>() // Pair(packageName, label)
 
         for (info in resolveInfos) {
-            val pkg = info.activityInfo.packageName
-            val label = info.loadLabel(pm).toString()
+            val pkg = info.activityInfo?.packageName ?: continue
+            val label = try { info.loadLabel(pm).toString() } catch (e: Exception) { pkg }
             if (label.lowercase().contains(trimmedQuery) || pkg.lowercase().contains(trimmedQuery)) {
                 matchingApps.add(Pair(pkg, label))
             }

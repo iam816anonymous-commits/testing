@@ -31,18 +31,28 @@ data class GoalModel(
             val trimmed = rawGoal.trim()
             val lower = trimmed.lowercase()
 
+            // 1. URL Navigation Intent: "go to google.com", "open https://example.com"
+            if (lower.startsWith("go to ") || lower.contains("http://") || lower.contains("https://")) {
+                val urlCandidate = if (lower.startsWith("go to ")) trimmed.substringAfter("go to ", ignoreCase = true).trim() else trimmed
+                return GoalModel(
+                    rawUserIntent = trimmed,
+                    normalizedObjective = trimmed,
+                    requestedActionType = ActionType.OPEN_URL,
+                    requestedActionTarget = urlCandidate
+                )
+            }
+
+            // 2. Generic App Launch Intent Extraction (no hardcoded app maps)
             val targetApp = when {
-                lower.contains("chrome") -> "Chrome"
-                lower.contains("youtube studio") -> "YouTube Studio"
-                lower.contains("youtube") -> "YouTube"
-                lower.contains("settings") -> "Settings"
-                lower.contains("chatgpt") -> "ChatGPT"
+                lower.startsWith("open ") && !lower.contains(" in ") -> trimmed.substringAfter("open ", ignoreCase = true).trim()
+                lower.startsWith("launch ") -> trimmed.substringAfter("launch ", ignoreCase = true).trim()
+                lower.startsWith("start ") -> trimmed.substringAfter("start ", ignoreCase = true).trim()
                 else -> null
             }
 
             // Command Decomposition Rules
-            var requestedType: ActionType? = null
-            var requestedTarget: String? = null
+            var requestedType: ActionType? = if (targetApp != null) ActionType.LAUNCH_APP else null
+            var requestedTarget: String? = targetApp
             var expectedText: String? = null
 
             when {
@@ -95,10 +105,12 @@ data class GoalModel(
                     requestedType = ActionType.SUBMIT_INPUT
                 }
                 else -> {
-                    expectedText = when {
-                        lower.contains("search for ") -> trimmed.substringAfter("search for ", ignoreCase = true).trim()
-                        lower.contains("search ") -> trimmed.substringAfter("search ", ignoreCase = true).trim()
-                        else -> null
+                    if (expectedText == null && targetApp == null) {
+                        expectedText = when {
+                            lower.contains("search for ") -> trimmed.substringAfter("search for ", ignoreCase = true).trim()
+                            lower.contains("search ") -> trimmed.substringAfter("search ", ignoreCase = true).trim()
+                            else -> null
+                        }
                     }
                 }
             }
