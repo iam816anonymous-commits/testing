@@ -423,13 +423,25 @@ class DeviceActionExecutor(
     }
 
     private fun performPressEnter(service: AutomationAccessibilityService, snapshot: UiSnapshot): ActionResult {
+        // Structured, privacy-safe diagnostic logging
+        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable }
+            ?: snapshot.editableNodes.firstOrNull()
+
+        if (focusedEditable != null) {
+            val nodeRef = focusedEditable.nodeRef as? AccessibilityNodeInfo
+            val actionsCount = nodeRef?.actionList?.size ?: 0
+            Log.i(TAG, "PRESS_ENTER_TARGET_DIAGNOSTICS: pkg=${snapshot.packageName}, class=${focusedEditable.className}, viewId=${focusedEditable.viewIdResourceName}, isFocused=${focusedEditable.isFocused}, isEditable=${focusedEditable.isEditable}, isClickable=${focusedEditable.isClickable}, isEnabled=${focusedEditable.isEnabled}, isVisible=${focusedEditable.isVisibleToUser}, parentClass=${focusedEditable.parentClassName}, actionsCount=$actionsCount")
+        } else {
+            Log.w(TAG, "PRESS_ENTER_TARGET_DIAGNOSTICS: No focused or editable node found in snapshot pkg=${snapshot.packageName}")
+        }
+
         // 1. Try finding explicit search/submit/enter buttons in UI (e.g., "Search", "Go", "Enter", "Submit", "Search or type web address")
         val searchCandidates = listOf("Search", "Go", "Enter", "Submit", "Search or type web address")
         val matchingNodes = mutableListOf<UiNodeInfo>()
 
         for (btnText in searchCandidates) {
             val searchButtonRes = actionResolver.resolveTargetWithAmbiguity(snapshot, btnText)
-            if (searchButtonRes.match != null) {
+            if (searchButtonRes.match != null && !searchButtonRes.match.node.isEditable) {
                 matchingNodes.add(searchButtonRes.match.node)
             }
         }
@@ -459,26 +471,13 @@ class DeviceActionExecutor(
             }
         }
 
-        // 2. Focused editable node submission: Click or perform focus action
-        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable }
-            ?: snapshot.editableNodes.firstOrNull()
-
-        if (focusedEditable != null) {
-            val editableNode = focusedEditable.nodeRef as? AccessibilityNodeInfo
-            if (editableNode != null) {
-                // Focus and perform click to trigger IME submit on keyboard
-                editableNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                editableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.i(TAG, "PRESS_ENTER_SUBMITTED: Performed click on focused editable field to trigger search")
-                return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = focusedEditable, matchMethod = "FOCUSED_EDITABLE_ENTER")
-            }
-        }
-
-        Log.w(TAG, "PRESS_ENTER_NO_CONTROL: No clickable submit control or editable field found")
+        // 2. Focused editable node submission: On API 27, an unprivileged AccessibilityService cannot dispatch physical IME Enter events without an explicit submit button or IME capability.
+        // Therefore, if no explicit clickable submit control is present, classify as UI_NOT_FOUND / UNSUPPORTED rather than declaring false SUCCESS.
+        Log.w(TAG, "PRESS_ENTER_NO_ACTIONABLE_CONTROL: No clickable search/submit control found on UI for package '${snapshot.packageName}'")
         return ActionResult(
             status = ActionResultStatus.FAILED,
             reason = ExecutionReason.UI_NOT_FOUND,
-            message = "No clickable search/submit control or editable field found to perform enter"
+            message = "No actionable search/submit control found on current UI to perform enter submission"
         )
     }
 
