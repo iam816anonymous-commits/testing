@@ -1,80 +1,65 @@
-# AUTOMATION KNOWLEDGE APPLICATION & DIAGNOSTIC AUDIT
+# AUTOMATION KNOWLEDGE APPLICATION & COMMAND DECOMPOSITION DIAGNOSTIC
 
 **Date:** March 2025
 **Target Platform:** Android 8.1 / API 27 (4 GB RAM, 64 GB Storage)
 **Package:** `com.creator.automation`
-**Execution Status:** IMPLEMENTED & FIXTURE TESTED (121 Unit Tests Passed) | PHYSICAL CHROME VALIDATION PENDING OWNER RUN
+**Execution Status:** IMPLEMENTED & FIXTURE TESTED (128 Unit Tests Passed) | PHYSICAL CHROME VALIDATION PENDING OWNER RUN
 
 ---
 
-## 1. INVESTIGATION OF INTERMITTENT WAITING & PIPELINE HARDENING
+## 1. COMPARISON FAILURE DIAGNOSIS & ROOT CAUSE
 
-### 1.1 Cause Analysis for Intermittent Waiting
-When executing SUBMIT or CLICK ("Press Go", "Press Enter"), previous runs occasionally entered an indefinite or unverified waiting state due to:
-1. **Target Node Stale State:** If the node tree mutated between initial target resolution and action dispatch, dispatches were attempted on stale or detached `AccessibilityNodeInfo` references.
-2. **False Success on Wait Condition Timeout:** In `DeviceActionExecutor.kt`, when attached `WaitCondition` polling timed out, `WaitEngine` returned `success = false`, but `DeviceActionExecutor` logged a warning and returned `ActionResultStatus.SUCCESS`.
-3. **Dispatch vs Verification Coupling:** `dispatchResult.status` was blended with `verificationStatus`, masking scenarios where `performAction(ACTION_CLICK)` returned `true` but the UI state signature remained unchanged (`StateChangeResult.NO_CHANGE`).
+### 1.1 Actual vs Expected Values
+During CI execution, two unit tests in `WorldStateDecisionTest.kt` failed:
+1. `testCommandDecompositionTypeCommand`:
+   - **Expected:** `"new Telugu movies"`
+   - **Actual:** `"Type new Telugu movies"`
+   - **ComparisonFailure Message:** `expected:<[new Telugu movies]> but was:<[Type new Telugu movies]>`
+2. `testCommandDecompositionCompoundSearchAndPressGo`:
+   - **Expected:** `"new Telugu movies"`
+   - **Actual:** `"Search for new Telugu movies and press Go"`
+   - **ComparisonFailure Message:** `expected:<[new Telugu movies]> but was:<[Search for new Telugu movies and press Go]>`
 
-### 1.2 Substrate Pipeline Fixes
-1. **Target Freshness Enforcement:** Immediately before dispatch in `performClickText` and `performSubmitInput`, `DeviceActionExecutor` re-observes a fresh `UiSnapshot` via `service.getRootNode()` and re-resolves the target node.
-2. **Strict Timeout Status Propagation:** When `action.waitCondition` times out, `executeAndAudit` explicitly sets `status = ActionResultStatus.TIMEOUT` and `reason = ExecutionReason.TIMEOUT`.
-3. **Separation of Dispatch & Verification:**
-   - `dispatchResult`: Platform execution result (`ACTION_CLICK` or `dispatchGestureTap` outcome).
-   - `verificationStatus`: Observed UI state change comparison (`beforeStateSig` vs `afterStateSig`).
-   - If dispatch succeeds but no UI state change occurs, verification status is marked `DISPATCH_SUCCEEDED_UNVERIFIED` rather than claiming full verification.
+### 1.2 Root Cause Analysis
+In `GoalModel.parse()`, Kotlin's `String.substringAfter("type ")` and `String.substringAfter("search for ")` were invoked without `ignoreCase = true`.
+Because Kotlin string extension methods are case-sensitive by default, `"Type new Telugu movies".substringAfter("type ")` failed to match the lower-case delimiter `"type "`, returning the original capitalized string `"Type new Telugu movies"` unchanged.
 
----
-
-## 2. COMMAND DECOMPOSITION RULES (`GoalModel.kt`)
-
-User commands are parsed into structured `GoalModel` objectives without text payload contamination:
-
-| User Natural Language Input | `requestedActionType` | `requestedActionTarget` | `expectedTextInResult` |
-| :--- | :--- | :--- | :--- |
-| `"Type new Telugu movies"` | `ActionType.TYPE_TEXT` | `null` | `"new Telugu movies"` |
-| `"Press Go"` | `ActionType.CLICK_TEXT` | `"Go"` | `null` |
-| `"Press Enter"` | `ActionType.SUBMIT_INPUT` | `null` | `null` |
-| `"Search for movies and press Go"` | `ActionType.SUBMIT_INPUT` | `"Go"` | `"movies"` |
+### 1.3 Production Fix Applied
+1. **Case-Insensitive Delimiter Parsing:** Updated `GoalModel.parse()` to use `substringAfter("type ", ignoreCase = true)` and `substringAfter("search for ", ignoreCase = true)`.
+2. **Payload Preservation Grammar:** Structured the parsing rules to distinguish command syntax ("Type ", "Press Go", "Press Enter") from literal user text payloads. When "Go" or "Enter" appear as actual content (e.g. `"Type Go"`, `"Type Enter"`, `"Search for movies about Go"`, `"Search for Enter keyboard shortcuts"`), they are strictly preserved in `expectedTextInResult`.
 
 ---
 
-## 3. STRUCTURED DIAGNOSTIC TRACE LOGGING FOR REAL-DEVICE OWNER TESTING
+## 2. COMMAND DECOMPOSITION SCENARIOS (A THROUGH J)
 
-For real-device debugging on Android 8.1 / API 27, `DeviceActionExecutor` logs privacy-safe, redacted diagnostic trace records:
-
-```text
-CLICK_DIAGNOSTIC:
-  package=com.android.chrome
-  target=[REDACTED]
-  text=Go
-  viewId=com.android.chrome:id/search_button
-  clickable=true
-  enabled=true
-  visible=true
-  resolvedBy=EXACT_TEXT
-  candidateCount=1
-  dispatchAttempt=ACTION_CLICK
-  dispatchResult=true
-  beforeStateSignature=e3b0c442...
-  afterStateSignature=f1d2a345...
-  uiChanged=true
-  packageChanged=false
-  finalVerification=VERIFIED_SUCCESS
-```
+| Scenario | Input Command | `requestedActionType` | `requestedActionTarget` | `expectedTextInResult` |
+| :--- | :--- | :--- | :--- | :--- |
+| **A** | `"Type new Telugu movies"` | `TYPE_TEXT` | `null` | `"new Telugu movies"` |
+| **B** | `"Press Go"` | `CLICK_TEXT` | `"Go"` | `null` |
+| **C** | `"Press Enter"` | `SUBMIT_INPUT` | `null` | `null` |
+| **D** | `"Search for new Telugu movies"` | `SUBMIT_INPUT` | `null` | `"new Telugu movies"` |
+| **E** | `"Search for new Telugu movies and press Go"` | `SUBMIT_INPUT` | `"Go"` | `"new Telugu movies"` |
+| **F** | `"Type Go"` | `TYPE_TEXT` | `null` | `"Go"` (Payload preserved) |
+| **G** | `"Type Enter"` | `TYPE_TEXT` | `null` | `"Enter"` (Payload preserved) |
+| **H** | `"Search for movies about Go"` | `SUBMIT_INPUT` | `null` | `"movies about Go"` |
+| **I** | `"Search for Enter keyboard shortcuts"` | `SUBMIT_INPUT` | `null` | `"Enter keyboard shortcuts"` |
+| **J** | `"Press Go after typing hello"` | `SUBMIT_INPUT` | `"Go"` | `"hello"` |
 
 ---
 
-## 4. TEST SUITE RESULTS (121 PASSED, 0 FAILED)
+## 3. TEST SUITE RESULTS (128 PASSED, 0 FAILED)
 
 - **Total Test Suites:** 29
-- **Total Unit Tests:** 121
+- **Total Unit Tests:** 128
 - **Test Failures:** 0
 - **Test Errors:** 0
-- **Build Targets:** Both Debug (`app-debug.apk`) and Release (`app-release.apk`) compiled cleanly via `./gradlew test assembleDebug assembleRelease`.
+- **Build Commands Run:**
+  - `./gradlew test` -> **BUILD SUCCESSFUL**
+  - `./gradlew test assembleDebug` -> **BUILD SUCCESSFUL**
 
 ---
 
-## 5. PHYSICAL CHROME VALIDATION STATEMENT
+## 4. PHYSICAL CHROME VALIDATION STATEMENT
 
 > **PHYSICAL CHROME VALIDATION STATUS:** PENDING OWNER TESTING ON PHYSICAL DEVICE.
 > As Jules cannot perform physical runs on the owner's phone (`adb devices` returned 0 connected devices), physical execution on Chrome / API 27 remains **UNRESOLVED / BLOCKED** and must be tested by the phone owner using `app-debug.apk`.

@@ -124,15 +124,17 @@ class WorldStateDecisionTest {
         assertTrue(decision is ActionDecision)
     }
 
+    // Command Decomposition Unit Tests (Scenarios A through J)
+
     @Test
-    fun testCommandDecompositionTypeCommand() {
+    fun testScenarioA_TypeCommand() {
         val parsed = GoalModel.parse("Type new Telugu movies")
         assertEquals(ActionType.TYPE_TEXT, parsed.requestedActionType)
         assertEquals("new Telugu movies", parsed.expectedTextInResult)
     }
 
     @Test
-    fun testCommandDecompositionPressGoCommand() {
+    fun testScenarioB_PressGoCommand() {
         val parsed = GoalModel.parse("Press Go")
         assertEquals(ActionType.CLICK_TEXT, parsed.requestedActionType)
         assertEquals("Go", parsed.requestedActionTarget)
@@ -140,16 +142,59 @@ class WorldStateDecisionTest {
     }
 
     @Test
-    fun testCommandDecompositionPressEnterCommand() {
+    fun testScenarioC_PressEnterCommand() {
         val parsed = GoalModel.parse("Press Enter")
         assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
         assertNull(parsed.expectedTextInResult)
     }
 
     @Test
-    fun testCommandDecompositionCompoundSearchAndPressGo() {
+    fun testScenarioD_SearchForMovies() {
+        val parsed = GoalModel.parse("Search for new Telugu movies")
+        assertEquals("new Telugu movies", parsed.expectedTextInResult)
+        assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
+    }
+
+    @Test
+    fun testScenarioE_CompoundSearchAndPressGo() {
         val parsed = GoalModel.parse("Search for new Telugu movies and press Go")
         assertEquals("new Telugu movies", parsed.expectedTextInResult)
+        assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
+        assertEquals("Go", parsed.requestedActionTarget)
+    }
+
+    @Test
+    fun testScenarioF_TypeGoPreservesPayload() {
+        val parsed = GoalModel.parse("Type Go")
+        assertEquals(ActionType.TYPE_TEXT, parsed.requestedActionType)
+        assertEquals("Go", parsed.expectedTextInResult)
+    }
+
+    @Test
+    fun testScenarioG_TypeEnterPreservesPayload() {
+        val parsed = GoalModel.parse("Type Enter")
+        assertEquals(ActionType.TYPE_TEXT, parsed.requestedActionType)
+        assertEquals("Enter", parsed.expectedTextInResult)
+    }
+
+    @Test
+    fun testScenarioH_SearchForMoviesAboutGoPreservesPayload() {
+        val parsed = GoalModel.parse("Search for movies about Go")
+        assertEquals("movies about Go", parsed.expectedTextInResult)
+        assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
+    }
+
+    @Test
+    fun testScenarioI_SearchForEnterKeyboardShortcutsPreservesPayload() {
+        val parsed = GoalModel.parse("Search for Enter keyboard shortcuts")
+        assertEquals("Enter keyboard shortcuts", parsed.expectedTextInResult)
+        assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
+    }
+
+    @Test
+    fun testScenarioJ_PressGoAfterTypingHello() {
+        val parsed = GoalModel.parse("Press Go after typing hello")
+        assertEquals("hello", parsed.expectedTextInResult)
         assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
         assertEquals("Go", parsed.requestedActionTarget)
     }
