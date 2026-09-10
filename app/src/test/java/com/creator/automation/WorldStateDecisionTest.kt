@@ -125,18 +125,32 @@ class WorldStateDecisionTest {
     }
 
     @Test
-    fun testGoalModelParsingAndObjectiveNormalization() {
-        val parsedGoal = GoalModel.parse("  Open Chrome and search for cats  ")
-        assertEquals("Open Chrome and search for cats", parsedGoal.rawUserIntent)
-        assertEquals("Open Chrome and search for cats", parsedGoal.normalizedObjective)
-        assertEquals("Chrome", parsedGoal.targetAppQuery)
-        assertEquals("cats", parsedGoal.expectedTextInResult)
+    fun testCommandDecompositionTypeCommand() {
+        val parsed = GoalModel.parse("Type new Telugu movies")
+        assertEquals(ActionType.TYPE_TEXT, parsed.requestedActionType)
+        assertEquals("new Telugu movies", parsed.expectedTextInResult)
     }
 
     @Test
-    fun testGoalModelDefaultNormalizedObjectivePropagation() {
-        val directGoal = GoalModel(rawUserIntent = "Navigate Settings")
-        assertEquals("Navigate Settings", directGoal.rawUserIntent)
-        assertEquals("Navigate Settings", directGoal.normalizedObjective)
+    fun testCommandDecompositionPressGoCommand() {
+        val parsed = GoalModel.parse("Press Go")
+        assertEquals(ActionType.CLICK_TEXT, parsed.requestedActionType)
+        assertEquals("Go", parsed.requestedActionTarget)
+        assertNull(parsed.expectedTextInResult)
+    }
+
+    @Test
+    fun testCommandDecompositionPressEnterCommand() {
+        val parsed = GoalModel.parse("Press Enter")
+        assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
+        assertNull(parsed.expectedTextInResult)
+    }
+
+    @Test
+    fun testCommandDecompositionCompoundSearchAndPressGo() {
+        val parsed = GoalModel.parse("Search for new Telugu movies and press Go")
+        assertEquals("new Telugu movies", parsed.expectedTextInResult)
+        assertEquals(ActionType.SUBMIT_INPUT, parsed.requestedActionType)
+        assertEquals("Go", parsed.requestedActionTarget)
     }
 }

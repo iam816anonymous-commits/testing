@@ -99,6 +99,7 @@ class DeviceActionExecutor(
         }
 
         // 4. Evaluate WaitCondition if attached to action
+        var finalDispatchResult = dispatchResult
         if (dispatchResult.status == ActionResultStatus.SUCCESS && action.waitCondition != null) {
             val waitRes = waitEngine.waitUntil(
                 condition = action.waitCondition,
@@ -108,6 +109,11 @@ class DeviceActionExecutor(
             )
             if (!waitRes.success) {
                 Log.w(TAG, "ACTION_WAIT_CONDITION_FAILED: ${waitRes.failureReason}")
+                finalDispatchResult = ActionResult(
+                    status = ActionResultStatus.TIMEOUT,
+                    reason = ExecutionReason.TIMEOUT,
+                    message = waitRes.failureReason ?: "Wait condition timed out"
+                )
             }
         }
 
@@ -121,10 +127,12 @@ class DeviceActionExecutor(
         val stateChange = compareStates(beforeStateSig, afterStateSig, verificationAction != null)
 
         // 6. Verify Result
-        val verificationStatus = if (dispatchResult.status == ActionResultStatus.SUCCESS) {
+        val verificationStatus = if (finalDispatchResult.status == ActionResultStatus.SUCCESS) {
             if (verificationAction != null) {
                 val verifyRes = performWaitForText(verificationAction.targetValue, verificationAction.timeoutMs, service)
                 if (verifyRes.status == ActionResultStatus.SUCCESS) VerificationStatus.SUCCESSFULLY_VERIFIED else VerificationStatus.FAILED
+            } else if (stateChange != StateChangeResult.NO_CHANGE) {
+                VerificationStatus.SUCCESSFULLY_VERIFIED
             } else {
                 VerificationStatus.DISPATCHED
             }
@@ -132,7 +140,8 @@ class DeviceActionExecutor(
             VerificationStatus.FAILED
         }
 
-        val isOverallSuccess = dispatchResult.status == ActionResultStatus.SUCCESS && verificationStatus != VerificationStatus.FAILED
+        val isOverallSuccess = finalDispatchResult.status == ActionResultStatus.SUCCESS && verificationStatus != VerificationStatus.FAILED
+        val effectiveReason = if (finalDispatchResult.status != ActionResultStatus.SUCCESS) finalDispatchResult.reason else if (verificationStatus == VerificationStatus.FAILED) ExecutionReason.VERIFICATION_FAILED else ExecutionReason.NONE
 
         // 7. Persist Audit Record
         val auditRecord = ActionAuditRecord(
@@ -144,26 +153,27 @@ class DeviceActionExecutor(
             actionType = action.type.name,
             targetIdentifier = redactedTarget,
             actionParametersSummary = "Type=${action.type}, Timeout=${action.timeoutMs}ms, Semantics=${action.semantics}",
-            dispatchResult = dispatchResult.status.name,
+            dispatchResult = finalDispatchResult.status.name,
             afterStateSignature = afterStateSig,
             stateChangeResult = stateChange.name,
             verificationStatus = verificationStatus.name,
-            reason = dispatchResult.reason.name,
+            reason = effectiveReason.name,
             success = isOverallSuccess,
-            failureReason = if (!isOverallSuccess) dispatchResult.message ?: "Verification failed" else null,
+            failureReason = if (!isOverallSuccess) finalDispatchResult.message ?: "Verification failed" else null,
             durationMs = durationMs
         )
 
         try {
             auditDao.insertAuditRecord(auditRecord)
-            Log.i(TAG, "AUDIT_LOGGED: Action ${action.type} -> Success=$isOverallSuccess, Verification=$verificationStatus, Reason=${dispatchResult.reason}")
+            Log.i(TAG, "AUDIT_LOGGED: Action ${action.type} -> Success=$isOverallSuccess, Verification=$verificationStatus, Reason=$effectiveReason")
         } catch (e: Exception) {
             Log.e(TAG, "Error writing action audit record", e)
         }
 
-        return dispatchResult.copy(
+        return finalDispatchResult.copy(
             snapshot = afterSnapshot,
-            message = if (!isOverallSuccess) dispatchResult.message ?: "Verification failed" else dispatchResult.message
+            reason = effectiveReason,
+            message = if (!isOverallSuccess) finalDispatchResult.message ?: "Verification failed" else finalDispatchResult.message
         )
     }
 
@@ -296,10 +306,15 @@ class DeviceActionExecutor(
         beforeStateSig: String
     ): ActionResult {
         if (targetText.isNullOrBlank()) return ActionResult(status = ActionResultStatus.FAILED, message = "CLICK_TEXT requires target text")
-        val res = actionResolver.resolveTargetWithAmbiguity(snapshot, targetText)
+
+        // Target Freshness Enforcement: Capture fresh snapshot immediately before target resolution & dispatch
+        val freshRoot = service.getRootNode()
+        val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+
+        val res = actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetText)
 
         if (res.match == null) {
-            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_NOT_FOUND")
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${freshSnapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_NOT_FOUND")
             return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "TARGET_NOT_FOUND: Text '$targetText' not found in active window")
         }
 

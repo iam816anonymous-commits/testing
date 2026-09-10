@@ -42,7 +42,44 @@ class TaskDecisionEngine(
             )
         }
 
-        // 4. Step B: Query / Search entry
+        // 4. Step B: Explicit Requested Action Decomposition (e.g. "Press Go", "Press Enter", "Type ...")
+        if (goal.requestedActionType != null) {
+            when (goal.requestedActionType) {
+                ActionType.CLICK_TEXT -> {
+                    val targetName = goal.requestedActionTarget ?: "Go"
+                    return ActionDecision(
+                        actionType = ActionType.CLICK_TEXT,
+                        target = targetName,
+                        reason = "Executing requested click on '$targetName'",
+                        confidence = 0.95,
+                        expectedOutcome = "Dispatched click on '$targetName'"
+                    )
+                }
+                ActionType.SUBMIT_INPUT -> {
+                    return ActionDecision(
+                        actionType = ActionType.SUBMIT_INPUT,
+                        reason = "Executing requested input submission",
+                        confidence = 0.95,
+                        expectedOutcome = "Input submission dispatched"
+                    )
+                }
+                ActionType.TYPE_TEXT -> {
+                    val textToType = goal.expectedTextInResult ?: goal.rawUserIntent
+                    val editable = worldState.editableTargets.firstOrNull()
+                    return ActionDecision(
+                        actionType = ActionType.TYPE_TEXT,
+                        target = editable?.text ?: editable?.viewIdResourceName,
+                        inputData = textToType,
+                        reason = "Executing requested text typing for '$textToType'",
+                        confidence = 0.90,
+                        expectedOutcome = "Text injected into editable field"
+                    )
+                }
+                else -> {}
+            }
+        }
+
+        // 5. Step C: Query / Search entry
         if (!goal.expectedTextInResult.isNullOrBlank()) {
             val editable = worldState.editableTargets.firstOrNull()
             if (editable != null) {
@@ -56,7 +93,7 @@ class TaskDecisionEngine(
                 )
             }
 
-            // Step C: Look for clickable Search / Submit control if text already typed
+            // Step D: Look for clickable Search / Submit control if text already typed
             val searchBtn = worldState.clickableTargets.firstOrNull {
                 it.text?.equals("Search", ignoreCase = true) == true ||
                         it.contentDescription?.equals("Search", ignoreCase = true) == true ||

@@ -15,6 +15,8 @@ data class GoalModel(
     val normalizedObjective: String = rawUserIntent,
     val targetAppQuery: String? = null,
     val expectedTextInResult: String? = null,
+    val requestedActionType: ActionType? = null,
+    val requestedActionTarget: String? = null,
     val maxActionBudget: Int = 10,
     val currentActionCount: Int = 0,
     val status: GoalStatus = GoalStatus.PARSED,
@@ -38,18 +40,50 @@ data class GoalModel(
                 else -> null
             }
 
-            val expectedText = when {
-                lower.contains("search for") -> trimmed.substringAfter("search for").trim()
-                lower.contains("search") -> trimmed.substringAfter("search").trim()
-                lower.contains("query") -> trimmed.substringAfter("query").trim()
-                else -> null
+            // Command Decomposition Rules
+            var requestedType: ActionType? = null
+            var requestedTarget: String? = null
+            var expectedText: String? = null
+
+            when {
+                lower == "press go" || lower == "click go" -> {
+                    requestedType = ActionType.CLICK_TEXT
+                    requestedTarget = "Go"
+                }
+                lower == "press enter" || lower == "submit" -> {
+                    requestedType = ActionType.SUBMIT_INPUT
+                }
+                lower.startsWith("type ") -> {
+                    requestedType = ActionType.TYPE_TEXT
+                    expectedText = trimmed.substringAfter("type ").trim()
+                }
+                lower.contains("and press go") || lower.contains("and click go") -> {
+                    val searchPart = trimmed.substringBefore("and press go").substringBefore("and click go").trim()
+                    expectedText = when {
+                        searchPart.lowercase().contains("search for ") -> searchPart.substringAfter("search for ").trim()
+                        searchPart.lowercase().contains("search ") -> searchPart.substringAfter("search ").trim()
+                        else -> searchPart
+                    }
+                    requestedType = ActionType.SUBMIT_INPUT
+                    requestedTarget = "Go"
+                }
+                else -> {
+                    expectedText = when {
+                        lower.contains("search for ") -> trimmed.substringAfter("search for ").trim()
+                        lower.contains("search ") -> trimmed.substringAfter("search ").trim()
+                        lower.contains("query ") -> trimmed.substringAfter("query ").trim()
+                        else -> null
+                    }
+                }
             }
 
             return GoalModel(
                 rawUserIntent = trimmed,
                 normalizedObjective = trimmed,
                 targetAppQuery = targetApp,
-                expectedTextInResult = expectedText
+                expectedTextInResult = expectedText,
+                requestedActionType = requestedType,
+                requestedActionTarget = requestedTarget
             )
         }
     }
