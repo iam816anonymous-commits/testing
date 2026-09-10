@@ -170,7 +170,9 @@ class ActionResolver {
 
         // 1. View ID Matches
         val idMatches = snapshot.allNodes.filter {
-            it.viewIdResourceName != null && it.viewIdResourceName.endsWith(trimmedTarget, ignoreCase = true)
+            it.viewIdResourceName != null &&
+                    (it.viewIdResourceName.endsWith(trimmedTarget, ignoreCase = true) ||
+                     it.viewIdResourceName.contains(trimmedTarget, ignoreCase = true))
         }
         if (idMatches.isNotEmpty()) {
             val isAmbiguous = idMatches.size > 1
@@ -334,7 +336,8 @@ class ActionResolver {
      */
     fun resolveEditableTarget(snapshot: UiSnapshot, hintOrLabel: String? = null): TargetResolutionResult {
         // 1. If currently focused editable node exists
-        val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable && it.isEnabled }
+        val allFocused = if (snapshot.focusedNodes.isNotEmpty()) snapshot.focusedNodes else snapshot.allNodes.filter { it.isFocused }
+        val focusedEditable = allFocused.firstOrNull { it.isEditable && it.isEnabled }
         if (focusedEditable != null) {
             return TargetResolutionResult(
                 match = ResolutionMatch(
@@ -359,7 +362,8 @@ class ActionResolver {
         }
 
         // 3. Fallback: single editable field on screen
-        val activeEditables = snapshot.editableNodes.filter { it.isEnabled }
+        val allEditables = if (snapshot.editableNodes.isNotEmpty()) snapshot.editableNodes else snapshot.allNodes.filter { it.isEditable }
+        val activeEditables = allEditables.filter { it.isEnabled }
         if (activeEditables.isNotEmpty()) {
             val isAmbiguous = activeEditables.size > 1
             val best = activeEditables.first()
