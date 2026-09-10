@@ -15,6 +15,9 @@ interface ActionAuditDao {
     @Query("SELECT * FROM action_audit_records ORDER BY timestamp DESC")
     fun getAllAuditRecordsFlow(): Flow<List<ActionAuditRecord>>
 
+    @Query("SELECT * FROM action_audit_records ORDER BY timestamp DESC")
+    suspend fun getAllAuditRecords(): List<ActionAuditRecord>
+
     @Query("SELECT * FROM action_audit_records ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLatestAuditRecord(): ActionAuditRecord?
 

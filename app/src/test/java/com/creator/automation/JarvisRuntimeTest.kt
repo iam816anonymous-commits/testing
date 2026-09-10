@@ -91,4 +91,55 @@ class JarvisRuntimeTest {
         assertNotNull(searchSkill)
         assertEquals("Search", searchSkill?.name)
     }
+
+    @Test
+    fun testResourceGuard_CheckMetricsMode() {
+        val guard = ResourceGuard(mockContext)
+        val metrics = guard.checkResourceState()
+
+        assertNotNull(metrics.mode)
+        assertTrue(metrics.usedHeapMb >= 0)
+        assertTrue(metrics.maxHeapMb > 0)
+    }
+
+    @Test
+    fun testAIContext_SanitizesSensitiveParameters() {
+        val worldState = WorldState(
+            packageName = "com.mock.login",
+            visibleTexts = listOf("Username", "secretpassword123")
+        )
+
+        val sanitizedContext = AIContext.createSanitized("User login intent", worldState)
+
+        assertEquals("com.mock.login", sanitizedContext.packageName)
+        assertTrue(sanitizedContext.visibleTexts.contains("[REDACTED]"))
+    }
+
+    @Test
+    fun testResearchEngine_DomainCategorization() {
+        val engine = ResearchEngine(mockContext)
+
+        assertEquals(ResearchDomain.YOUTUBE_INTELLIGENCE, engine.categorizeDomain("Check YouTube Short analytics"))
+        assertEquals(ResearchDomain.NEWS_INTELLIGENCE, engine.categorizeDomain("Read today's AP news headlines"))
+        assertEquals(ResearchDomain.FARM_RESEARCH, engine.categorizeDomain("Rainfall and crop yield analysis"))
+        assertEquals(ResearchDomain.BUSINESS_RESEARCH, engine.categorizeDomain("Market competitor price comparison"))
+    }
+
+    @Test
+    fun testAIWorkerRouter_FallbackToTaskDecisionEngineWhenUnconfigured() {
+        val router = AIWorkerRouter(
+            context = mockContext,
+            primaryProvider = ChatGPTReasoningProvider(apiKey = null),
+            secondaryProvider = GeminiReasoningProvider(apiKey = null)
+        )
+
+        val goal = GoalModel.parse("Open Settings")
+        val worldState = WorldState(packageName = "com.android.chrome", freshness = WorldStateFreshness.OBSERVED)
+
+        kotlinx.coroutines.runBlocking {
+            val decision = router.routeTaskReasoning(goal, worldState, emptyList())
+            assertEquals(ActionType.LAUNCH_APP, decision.actionType)
+            assertEquals("Settings", decision.target)
+        }
+    }
 }

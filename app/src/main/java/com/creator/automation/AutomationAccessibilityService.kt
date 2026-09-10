@@ -175,6 +175,24 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Generic gesture tap fallback dispatched to (x, y) bounds center.
+     */
+    fun dispatchGestureTap(x: Float, y: Float): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
+        return try {
+            val path = android.graphics.Path().apply {
+                moveTo(x, y)
+            }
+            val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 50)
+            val gesture = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+            dispatchGesture(gesture, null, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error dispatching gesture tap at ($x, $y)", e)
+            false
+        }
+    }
+
+    /**
      * Takes a screenshot of the current active screen and saves it locally.
      * Returns the absolute path of the saved screenshot or null if failed.
      */

@@ -328,16 +328,34 @@ class DeviceActionExecutor(
             targetNode = targetNode.parent
         }
 
-        if (targetNode == null || !targetNode.isClickable) {
-            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=DISPATCH_FAILED_NO_CLICKABLE_ANCESTOR")
-            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "DISPATCH_FAILED: Target '$targetText' has no clickable node or parent ancestor")
+        val boundsRect = android.graphics.Rect()
+        nodeRef.getBoundsInScreen(boundsRect)
+        val targetBounds = TargetBounds(boundsRect.left, boundsRect.top, boundsRect.right, boundsRect.bottom)
+
+        // Update live visualization overlay
+        AutomationOverlayState.updateState(
+            actionState = VisualizationActionState.CLICKING,
+            targetText = redactSensitiveText(targetText),
+            targetViewId = match.node.viewIdResourceName,
+            targetClassName = match.node.className,
+            targetBounds = targetBounds,
+            packageName = snapshot.packageName
+        )
+
+        var dispatchAttempt = "ACTION_CLICK"
+        var dispatchResult = targetNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+
+        // Generic Gesture Fallback: If performAction(ACTION_CLICK) fails or no clickable parent exists, use dispatchGestureTap() at bounds center
+        if (!dispatchResult && targetBounds.width > 0 && targetBounds.height > 0) {
+            Log.i(TAG, "ACTION_CLICK_FAILED: Attempting bounds-derived gesture tap fallback at (${targetBounds.centerX}, ${targetBounds.centerY})")
+            dispatchAttempt = "GESTURE_TAP_FALLBACK"
+            dispatchResult = service.dispatchGestureTap(targetBounds.centerX.toFloat(), targetBounds.centerY.toFloat())
         }
 
-        val dispatchResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-
         if (!dispatchResult) {
+            AutomationOverlayState.updateState(VisualizationActionState.FAILED, targetText = redactSensitiveText(targetText))
             Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=DISPATCH_FAILED")
-            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "DISPATCH_FAILED: ACTION_CLICK performAction returned false")
+            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "DISPATCH_FAILED: Click action and gesture fallback failed for '$targetText'")
         }
 
         // Post-click Verification
