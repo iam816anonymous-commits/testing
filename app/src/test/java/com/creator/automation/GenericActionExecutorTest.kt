@@ -27,6 +27,7 @@ class GenericActionExecutorTest {
         assertNotNull(ActionType.valueOf("TYPE_TEXT"))
         assertNotNull(ActionType.valueOf("CLEAR_TEXT"))
         assertNotNull(ActionType.valueOf("PRESS_ENTER"))
+        assertNotNull(ActionType.valueOf("SUBMIT_INPUT"))
         assertNotNull(ActionType.valueOf("PRESS_HOME"))
         assertNotNull(ActionType.valueOf("PRESS_RECENTS"))
         assertNotNull(ActionType.valueOf("SCROLL_UP"))
@@ -39,6 +40,7 @@ class GenericActionExecutorTest {
     fun testExecutionReason_ContainsAppNotInstalledAndAmbiguousApp() {
         assertNotNull(ExecutionReason.valueOf("APP_NOT_INSTALLED"))
         assertNotNull(ExecutionReason.valueOf("AMBIGUOUS_APPLICATION"))
+        assertNotNull(ExecutionReason.valueOf("UNSUPPORTED_SUBMISSION_MECHANISM"))
     }
 
     @Test

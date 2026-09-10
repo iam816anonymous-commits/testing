@@ -87,7 +87,7 @@ class DeviceActionExecutor(
             ActionType.LONG_CLICK -> performLongClick(action.targetValue, beforeSnapshot)
             ActionType.TYPE_TEXT -> performTypeText(action.targetValue, action.inputData, beforeSnapshot)
             ActionType.CLEAR_TEXT -> performClearText(action.targetValue, beforeSnapshot)
-            ActionType.PRESS_ENTER -> performPressEnter(service, beforeSnapshot)
+            ActionType.PRESS_ENTER, ActionType.SUBMIT_INPUT -> performSubmitInput(service, beforeSnapshot)
             ActionType.SCROLL, ActionType.SCROLL_DOWN -> performScroll(service, beforeSnapshot, forward = true, beforeStateSig = beforeStateSig)
             ActionType.SCROLL_UP -> performScroll(service, beforeSnapshot, forward = false, beforeStateSig = beforeStateSig)
             ActionType.GO_BACK -> performGoBack(service)
@@ -422,20 +422,56 @@ class DeviceActionExecutor(
         }
     }
 
-    private fun performPressEnter(service: AutomationAccessibilityService, snapshot: UiSnapshot): ActionResult {
+    private fun formatNodeActions(nodeRef: AccessibilityNodeInfo?): String {
+        if (nodeRef == null) return "[]"
+        val actions = nodeRef.actionList ?: return "[]"
+        return actions.joinToString(", ") { action ->
+            when (action.id) {
+                AccessibilityNodeInfo.ACTION_FOCUS -> "ACTION_FOCUS"
+                AccessibilityNodeInfo.ACTION_CLEAR_FOCUS -> "ACTION_CLEAR_FOCUS"
+                AccessibilityNodeInfo.ACTION_SELECT -> "ACTION_SELECT"
+                AccessibilityNodeInfo.ACTION_CLEAR_SELECTION -> "ACTION_CLEAR_SELECTION"
+                AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
+                AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
+                AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS -> "ACTION_ACCESSIBILITY_FOCUS"
+                AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS -> "ACTION_CLEAR_ACCESSIBILITY_FOCUS"
+                AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY -> "ACTION_NEXT_AT_MOVEMENT_GRANULARITY"
+                AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY -> "ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY"
+                AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT -> "ACTION_NEXT_HTML_ELEMENT"
+                AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT -> "ACTION_PREVIOUS_HTML_ELEMENT"
+                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
+                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
+                AccessibilityNodeInfo.ACTION_COPY -> "ACTION_COPY"
+                AccessibilityNodeInfo.ACTION_PASTE -> "ACTION_PASTE"
+                AccessibilityNodeInfo.ACTION_CUT -> "ACTION_CUT"
+                AccessibilityNodeInfo.ACTION_SET_SELECTION -> "ACTION_SET_SELECTION"
+                AccessibilityNodeInfo.ACTION_EXPAND -> "ACTION_EXPAND"
+                AccessibilityNodeInfo.ACTION_COLLAPSE -> "ACTION_COLLAPSE"
+                AccessibilityNodeInfo.ACTION_SET_TEXT -> "ACTION_SET_TEXT"
+                else -> action.label?.toString() ?: "ACTION_${action.id}"
+            }
+        }
+    }
+
+    private fun performSubmitInput(service: AutomationAccessibilityService, snapshot: UiSnapshot): ActionResult {
         // Structured, privacy-safe diagnostic logging
         val focusedEditable = snapshot.focusedNodes.firstOrNull { it.isEditable }
             ?: snapshot.editableNodes.firstOrNull()
 
         if (focusedEditable != null) {
             val nodeRef = focusedEditable.nodeRef as? AccessibilityNodeInfo
-            val actionsCount = nodeRef?.actionList?.size ?: 0
-            Log.i(TAG, "PRESS_ENTER_TARGET_DIAGNOSTICS: pkg=${snapshot.packageName}, class=${focusedEditable.className}, viewId=${focusedEditable.viewIdResourceName}, isFocused=${focusedEditable.isFocused}, isEditable=${focusedEditable.isEditable}, isClickable=${focusedEditable.isClickable}, isEnabled=${focusedEditable.isEnabled}, isVisible=${focusedEditable.isVisibleToUser}, parentClass=${focusedEditable.parentClassName}, actionsCount=$actionsCount")
+            val actionNames = formatNodeActions(nodeRef)
+            val isMultiLine = nodeRef?.isMultiLine ?: false
+            val maxTextLength = nodeRef?.maxTextLength ?: -1
+            val hintText = nodeRef?.hintText?.toString() ?: ""
+            val extrasKeys = nodeRef?.extras?.keySet()?.joinToString(", ") ?: "none"
+
+            Log.i(TAG, "SUBMIT_INPUT_TARGET_DIAGNOSTICS: pkg=${snapshot.packageName}, class=${focusedEditable.className}, viewId=${focusedEditable.viewIdResourceName}, isFocused=${focusedEditable.isFocused}, isEditable=${focusedEditable.isEditable}, isClickable=${focusedEditable.isClickable}, isEnabled=${focusedEditable.isEnabled}, isVisible=${focusedEditable.isVisibleToUser}, parentClass=${focusedEditable.parentClassName}, isMultiLine=$isMultiLine, maxTextLength=$maxTextLength, hintTextPresent=${hintText.isNotBlank()}, extrasKeys=[$extrasKeys], actions=[$actionNames]")
         } else {
-            Log.w(TAG, "PRESS_ENTER_TARGET_DIAGNOSTICS: No focused or editable node found in snapshot pkg=${snapshot.packageName}")
+            Log.w(TAG, "SUBMIT_INPUT_TARGET_DIAGNOSTICS: No focused or editable node found in snapshot pkg=${snapshot.packageName}")
         }
 
-        // 1. Try finding explicit search/submit/enter buttons in UI (e.g., "Search", "Go", "Enter", "Submit", "Search or type web address")
+        // 1. Mechanism 1: SEMANTIC SUBMIT CONTROL (Resolve explicit search/submit/enter controls in UI)
         val searchCandidates = listOf("Search", "Go", "Enter", "Submit", "Search or type web address")
         val matchingNodes = mutableListOf<UiNodeInfo>()
 
@@ -448,7 +484,7 @@ class DeviceActionExecutor(
 
         val distinctMatches = matchingNodes.distinctBy { it.boundsInScreen ?: it.text }
         if (distinctMatches.size > 1) {
-            Log.w(TAG, "PRESS_ENTER_AMBIGUOUS: Found ${distinctMatches.size} search/submit candidates. Execution blocked for safety.")
+            Log.w(TAG, "SUBMIT_INPUT_AMBIGUOUS: Found ${distinctMatches.size} search/submit candidates. Execution blocked for safety.")
             return ActionResult(
                 status = ActionResultStatus.BLOCKED,
                 reason = ExecutionReason.AMBIGUOUS_TARGET,
@@ -465,19 +501,20 @@ class DeviceActionExecutor(
                     targetNode = targetNode.parent
                 }
                 if (targetNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
-                    Log.i(TAG, "PRESS_ENTER_SUBMITTED: Clicked search/submit control '${best.text ?: best.contentDescription}'")
-                    return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = best, matchMethod = "SEARCH_BUTTON_CLICK")
+                    Log.i(TAG, "SUBMIT_INPUT_SUBMITTED: Clicked search/submit control '${best.text ?: best.contentDescription}'")
+                    return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = best, matchMethod = "SEMANTIC_SUBMIT_CONTROL")
                 }
             }
         }
 
-        // 2. Focused editable node submission: On API 27, an unprivileged AccessibilityService cannot dispatch physical IME Enter events without an explicit submit button or IME capability.
-        // Therefore, if no explicit clickable submit control is present, classify as UI_NOT_FOUND / UNSUPPORTED rather than declaring false SUCCESS.
-        Log.w(TAG, "PRESS_ENTER_NO_ACTIONABLE_CONTROL: No clickable search/submit control found on UI for package '${snapshot.packageName}'")
+        // 2. Mechanism 2: IME / Editor Action or Hardware Key Event
+        // On unprivileged API 27, hardware key event injection requires INJECT_EVENTS permission (signature/privileged) or UiAutomation shell commands.
+        // AccessibilityService on API 27 has no IME dispatch API or InputConnection access.
+        Log.w(TAG, "SUBMIT_INPUT_UNSUPPORTED_MECHANISM: No semantic submit control found and direct IME/hardware enter injection is unsupported on unprivileged API 27 for package '${snapshot.packageName}'")
         return ActionResult(
             status = ActionResultStatus.FAILED,
-            reason = ExecutionReason.UI_NOT_FOUND,
-            message = "No actionable search/submit control found on current UI to perform enter submission"
+            reason = ExecutionReason.UNSUPPORTED_SUBMISSION_MECHANISM,
+            message = "No supported submission mechanism (semantic submit control) available on current API 27 UI"
         )
     }
 
