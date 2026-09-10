@@ -168,45 +168,33 @@ class ActionResolver {
 
         val trimmedTarget = target.trim()
 
-        // Score all candidate nodes in snapshot
-        val scoredCandidates = snapshot.allNodes.mapNotNull { node ->
-            val score = scoreNodeCandidate(node, trimmedTarget)
-            if (score > 0.0) Pair(node, score) else null
-        }.sortedByDescending { it.second }
+        // 1. View ID Matches
+        val idMatches = snapshot.allNodes.filter {
+            it.viewIdResourceName != null && it.viewIdResourceName.endsWith(trimmedTarget, ignoreCase = true)
+        }
+        if (idMatches.isNotEmpty()) {
+            val isAmbiguous = idMatches.size > 1
+            val best = idMatches.first()
 
-        if (scoredCandidates.isNotEmpty()) {
-            val topScore = scoredCandidates.first().second
-            val topCandidates = scoredCandidates.filter { it.second == topScore }
-            val distinctTopBounds = topCandidates.map { it.first.boundsInScreen ?: it.first.text }.distinct()
-            val isAmbiguous = distinctTopBounds.size > 1
-
-            val bestNode = topCandidates.first().first
-            val bestScore = topCandidates.first().second
-
-            val matchMethod = when {
-                bestNode.viewIdResourceName?.endsWith(trimmedTarget, ignoreCase = true) == true -> "VIEW_ID"
-                bestNode.text?.equals(trimmedTarget, ignoreCase = true) == true -> "EXACT_TEXT"
-                bestNode.contentDescription?.equals(trimmedTarget, ignoreCase = true) == true -> "CONTENT_DESCRIPTION"
-                else -> "ACCESSIBILITY_PROPERTIES"
-            }
-
-            val status = when {
-                !bestNode.isEnabled || !bestNode.isVisibleToUser -> TargetResolutionStatus.NOT_ACTIONABLE
-                isAmbiguous -> TargetResolutionStatus.AMBIGUOUS
-                else -> TargetResolutionStatus.FOUND_UNIQUE
+            val status = if (!best.isEnabled || !best.isVisibleToUser) {
+                TargetResolutionStatus.NOT_ACTIONABLE
+            } else if (isAmbiguous) {
+                TargetResolutionStatus.AMBIGUOUS
+            } else {
+                TargetResolutionStatus.FOUND_UNIQUE
             }
 
             return TargetResolutionResult(
                 match = ResolutionMatch(
-                    node = bestNode,
-                    matchMethod = matchMethod,
-                    confidence = if (isAmbiguous) bestScore * 0.7 else bestScore,
-                    reason = "Candidate match score: ${"%.2f".format(bestScore)} ($matchMethod)"
+                    node = best,
+                    matchMethod = "VIEW_ID",
+                    confidence = if (isAmbiguous) 0.70 else 1.0,
+                    reason = "Matched View ID resource name: ${best.viewIdResourceName}"
                 ),
-                candidateCount = topCandidates.size,
+                candidateCount = idMatches.size,
                 isAmbiguous = isAmbiguous,
                 status = status,
-                explanation = if (isAmbiguous) "Ambiguous target: ${topCandidates.size} distinct candidates scored top confidence ${"%.2f".format(bestScore)}" else "Uniquely resolved target with confidence ${"%.2f".format(bestScore)}"
+                explanation = if (isAmbiguous) "Multiple candidates (${idMatches.size}) matched View ID '$target'" else "Uniquely resolved View ID '$target'"
             )
         }
 

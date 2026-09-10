@@ -52,6 +52,10 @@ data class WorldState(
                         it.className?.contains("PopupWindow", ignoreCase = true) == true
             }
 
+            val clickables = if (snapshot.clickableNodes.isNotEmpty()) snapshot.clickableNodes else snapshot.allNodes.filter { it.isClickable }
+            val editables = if (snapshot.editableNodes.isNotEmpty()) snapshot.editableNodes else snapshot.allNodes.filter { it.isEditable }
+            val scrollables = if (snapshot.scrollableNodes.isNotEmpty()) snapshot.scrollableNodes else snapshot.allNodes.filter { it.isScrollable }
+
             return WorldState(
                 packageName = snapshot.packageName,
                 activeWindow = snapshot.packageName,
@@ -60,10 +64,10 @@ data class WorldState(
                 visibleTexts = snapshot.visibleTexts,
                 contentDescriptions = snapshot.contentDescriptions,
                 viewIds = snapshot.viewIds,
-                clickableTargets = snapshot.clickableNodes,
-                editableTargets = snapshot.editableNodes,
+                clickableTargets = clickables,
+                editableTargets = editables,
                 focusedTarget = focused,
-                scrollableContainers = snapshot.scrollableNodes,
+                scrollableContainers = scrollables,
                 enabledControlsCount = snapshot.allNodes.count { it.isEnabled },
                 disabledControlsCount = snapshot.allNodes.count { !it.isEnabled },
                 isKeyboardVisible = hasKeyboard,
