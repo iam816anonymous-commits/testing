@@ -32,9 +32,13 @@ class WaitEngine(
             val currentSig = currentSnapshot?.let { StateSignatureGenerator.generateSignature(it) }
 
             val satisfied = when (condition.type) {
-                WaitConditionType.WAIT_FOR_TEXT -> {
+                WaitConditionType.WAIT_FOR_TEXT, WaitConditionType.NODE_APPEARS -> {
                     val target = condition.expectedValue ?: ""
-                    currentSnapshot != null && currentSnapshot.visibleTexts.any { it.contains(target, ignoreCase = true) }
+                    currentSnapshot != null && (
+                        currentSnapshot.visibleTexts.any { it.contains(target, ignoreCase = true) } ||
+                        currentSnapshot.viewIds.any { it.endsWith(target, ignoreCase = true) } ||
+                        currentSnapshot.contentDescriptions.any { it.contains(target, ignoreCase = true) }
+                    )
                 }
                 WaitConditionType.WAIT_FOR_VIEW_ID -> {
                     val viewId = condition.expectedValue ?: ""
@@ -55,6 +59,28 @@ class WaitEngine(
                     if (screenProvider != null) {
                         val screenObs = screenProvider.captureObservation()
                         screenObs.visualChangeState == VisualChangeResult.VISUAL_CHANGE.name
+                    } else false
+                }
+                WaitConditionType.NODE_DISAPPEARS, WaitConditionType.TEXT_DISAPPEARS -> {
+                    val target = condition.expectedValue ?: ""
+                    currentSnapshot == null || (
+                        currentSnapshot.visibleTexts.none { it.contains(target, ignoreCase = true) } &&
+                        currentSnapshot.viewIds.none { it.endsWith(target, ignoreCase = true) } &&
+                        currentSnapshot.contentDescriptions.none { it.contains(target, ignoreCase = true) }
+                    )
+                }
+                WaitConditionType.TARGET_BECOMES_ENABLED -> {
+                    val target = condition.expectedValue ?: ""
+                    if (currentSnapshot != null) {
+                        val res = actionResolver.resolveTargetWithAmbiguity(currentSnapshot, target)
+                        res.match != null && res.match.node.isEnabled
+                    } else false
+                }
+                WaitConditionType.EXPECTED_SAME_SCREEN_PROGRESS -> {
+                    if (currentSnapshot != null && initialSignature != null) {
+                        val samePackage = currentSnapshot.packageName.isNotBlank()
+                        val stateChanged = currentSig != initialSignature
+                        samePackage && stateChanged
                     } else false
                 }
             }
