@@ -66,6 +66,7 @@ fun CreatorAutomationScreen(context: Context) {
     val isTrainingActive by TrainingSessionManager.isTrainingActive.collectAsState()
 
     val agentState by AgentCore.agentState.collectAsState()
+    val overlayState by AutomationOverlayState.currentState.collectAsState()
 
     // Persistent Agent Runtime States
     val activeSession by AgentRuntimeManager.activeSession.collectAsState()
@@ -165,6 +166,46 @@ fun CreatorAutomationScreen(context: Context) {
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Diagnostic Overlay State Banner (Exposes live target bounds & click cursor position)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8EAF6))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LIVE AUTOMATION OVERLAY",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color(0xFF1A237E)
+                    )
+                    Text(
+                        text = overlayState.actionState.name,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFF283593)
+                    )
+                }
+                if (!overlayState.targetText.isNullOrBlank()) {
+                    Text("Target: '${overlayState.targetText}'", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (overlayState.targetBounds != null) {
+                    val bounds = overlayState.targetBounds!!
+                    Text(
+                        text = "Bounds: [${bounds.left}, ${bounds.top}][${bounds.right}, ${bounds.bottom}] | Cursor: (${overlayState.cursorX}, ${overlayState.cursorY})",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 

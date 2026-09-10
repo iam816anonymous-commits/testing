@@ -168,33 +168,45 @@ class ActionResolver {
 
         val trimmedTarget = target.trim()
 
-        // 1. View ID Matches
-        val idMatches = snapshot.allNodes.filter {
-            it.viewIdResourceName != null && it.viewIdResourceName.endsWith(trimmedTarget, ignoreCase = true)
-        }
-        if (idMatches.isNotEmpty()) {
-            val isAmbiguous = idMatches.size > 1
-            val best = idMatches.first()
+        // Score all candidate nodes in snapshot
+        val scoredCandidates = snapshot.allNodes.mapNotNull { node ->
+            val score = scoreNodeCandidate(node, trimmedTarget)
+            if (score > 0.0) Pair(node, score) else null
+        }.sortedByDescending { it.second }
 
-            val status = if (!best.isEnabled || !best.isVisibleToUser) {
-                TargetResolutionStatus.NOT_ACTIONABLE
-            } else if (isAmbiguous) {
-                TargetResolutionStatus.AMBIGUOUS
-            } else {
-                TargetResolutionStatus.FOUND_UNIQUE
+        if (scoredCandidates.isNotEmpty()) {
+            val topScore = scoredCandidates.first().second
+            val topCandidates = scoredCandidates.filter { it.second == topScore }
+            val distinctTopBounds = topCandidates.map { it.first.boundsInScreen ?: it.first.text }.distinct()
+            val isAmbiguous = distinctTopBounds.size > 1
+
+            val bestNode = topCandidates.first().first
+            val bestScore = topCandidates.first().second
+
+            val matchMethod = when {
+                bestNode.viewIdResourceName?.endsWith(trimmedTarget, ignoreCase = true) == true -> "VIEW_ID"
+                bestNode.text?.equals(trimmedTarget, ignoreCase = true) == true -> "EXACT_TEXT"
+                bestNode.contentDescription?.equals(trimmedTarget, ignoreCase = true) == true -> "CONTENT_DESCRIPTION"
+                else -> "ACCESSIBILITY_PROPERTIES"
+            }
+
+            val status = when {
+                !bestNode.isEnabled || !bestNode.isVisibleToUser -> TargetResolutionStatus.NOT_ACTIONABLE
+                isAmbiguous -> TargetResolutionStatus.AMBIGUOUS
+                else -> TargetResolutionStatus.FOUND_UNIQUE
             }
 
             return TargetResolutionResult(
                 match = ResolutionMatch(
-                    node = best,
-                    matchMethod = "VIEW_ID",
-                    confidence = if (isAmbiguous) 0.70 else 1.0,
-                    reason = "Matched View ID resource name: ${best.viewIdResourceName}"
+                    node = bestNode,
+                    matchMethod = matchMethod,
+                    confidence = if (isAmbiguous) bestScore * 0.7 else bestScore,
+                    reason = "Candidate match score: ${"%.2f".format(bestScore)} ($matchMethod)"
                 ),
-                candidateCount = idMatches.size,
+                candidateCount = topCandidates.size,
                 isAmbiguous = isAmbiguous,
                 status = status,
-                explanation = if (isAmbiguous) "Multiple candidates (${idMatches.size}) matched View ID '$target'" else "Uniquely resolved View ID '$target'"
+                explanation = if (isAmbiguous) "Ambiguous target: ${topCandidates.size} distinct candidates scored top confidence ${"%.2f".format(bestScore)}" else "Uniquely resolved target with confidence ${"%.2f".format(bestScore)}"
             )
         }
 
@@ -296,6 +308,36 @@ class ActionResolver {
             status = TargetResolutionStatus.NOT_FOUND,
             explanation = "Target '$target' not found in UI snapshot"
         )
+    }
+
+    private fun scoreNodeCandidate(node: UiNodeInfo, target: String): Double {
+        var score = 0.0
+        val lowerTarget = target.lowercase()
+
+        // 1. Match type scores
+        if (node.viewIdResourceName?.endsWith(target, ignoreCase = true) == true) {
+            score += 0.40
+        }
+        if (node.text?.equals(target, ignoreCase = true) == true) {
+            score += 0.30
+        } else if (node.text?.lowercase()?.contains(lowerTarget) == true) {
+            score += 0.15
+        }
+        if (node.contentDescription?.equals(target, ignoreCase = true) == true) {
+            score += 0.25
+        } else if (node.contentDescription?.lowercase()?.contains(lowerTarget) == true) {
+            score += 0.10
+        }
+
+        if (score == 0.0) return 0.0
+
+        // 2. Actionability bonuses
+        if (node.isClickable || node.isEditable) score += 0.10
+        if (node.isEnabled) score += 0.10
+        if (node.isFocused) score += 0.05
+        if (node.isVisibleToUser) score += 0.05
+
+        return score.coerceAtMost(1.0)
     }
 
     /**
