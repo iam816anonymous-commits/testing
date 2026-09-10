@@ -129,7 +129,7 @@ class JarvisRuntimeTest {
     fun testAIWorkerRouter_FallbackToTaskDecisionEngineWhenUnconfigured() {
         val router = AIWorkerRouter(
             context = mockContext,
-            primaryProvider = ChatGPTReasoningProvider(apiKey = null),
+            primaryProvider = ChatGPTReasoningProvider(isNetworkAvailable = false),
             secondaryProvider = GeminiReasoningProvider(apiKey = null)
         )
 
@@ -140,6 +140,30 @@ class JarvisRuntimeTest {
             val decision = router.routeTaskReasoning(goal, worldState, emptyList())
             assertEquals(ActionType.LAUNCH_APP, decision.actionType)
             assertEquals("Settings", decision.target)
+        }
+    }
+
+    @Test
+    fun testAIWorkerRouter_WithConfiguredSecondaryProvider_RoutesSecondaryPlan() {
+        val configuredGemini = GeminiReasoningProvider(apiKey = "mock-gemini-key")
+        val router = AIWorkerRouter(
+            context = mockContext,
+            primaryProvider = ChatGPTReasoningProvider(isNetworkAvailable = false),
+            secondaryProvider = configuredGemini
+        )
+
+        val goal = GoalModel.parse("Open Settings")
+        val worldState = WorldState(packageName = "com.android.chrome", freshness = WorldStateFreshness.OBSERVED)
+        val snapshot = AutomationCapabilitySnapshot(
+            packageName = "com.android.chrome",
+            availableCapabilities = listOf(ActionType.LAUNCH_APP.name, ActionType.READ_VISIBLE_UI.name)
+        )
+
+        kotlinx.coroutines.runBlocking {
+            val decision = router.routeTaskReasoning(goal, worldState, listOf(snapshot))
+            assertEquals(ActionType.LAUNCH_APP, decision.actionType)
+            assertEquals("Settings", decision.target)
+            assertTrue(decision.reason.contains("Gemini"))
         }
     }
 }

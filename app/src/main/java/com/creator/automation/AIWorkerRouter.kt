@@ -19,11 +19,16 @@ class AIWorkerRouter(
         worldState: WorldState,
         capabilities: List<AutomationCapabilitySnapshot>
     ): ActionDecision {
+        val availableActions = capabilities.flatMap { it.availableCapabilities }
+            .ifEmpty { ActionType.values().map { it.name } }
+            .distinct()
+
         val request = ReasoningRequest(
             taskDescription = goal.rawUserIntent,
             currentApp = worldState.packageName,
             currentStateSignature = worldState.screenSignature,
-            visibleUISummary = worldState.visibleTexts.take(8).joinToString("; ")
+            visibleUISummary = worldState.visibleTexts.take(8).joinToString("; "),
+            availableActionTypes = availableActions
         )
 
         // 1. Try Primary Provider (e.g. ChatGPT)
