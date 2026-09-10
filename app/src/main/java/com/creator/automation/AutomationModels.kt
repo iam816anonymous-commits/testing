@@ -40,6 +40,42 @@ data class UiNodeInfo(
     val nodeRef: Any? = null
 )
 
+data class TargetBounds(
+    val left: Int = 0,
+    val top: Int = 0,
+    val right: Int = 0,
+    val bottom: Int = 0
+) {
+    val centerX: Int get() = (left + right) / 2
+    val centerY: Int get() = (top + bottom) / 2
+    val width: Int get() = right - left
+    val height: Int get() = bottom - top
+}
+
+enum class VisualizationActionState {
+    OBSERVING,
+    TARGET_FOUND,
+    CLICKING,
+    TYPING,
+    WAITING,
+    VERIFYING,
+    SUCCESS,
+    FAILED,
+    RECOVERING
+}
+
+data class AutomationVisualizationState(
+    val actionState: VisualizationActionState = VisualizationActionState.OBSERVING,
+    val targetText: String? = null,
+    val targetViewId: String? = null,
+    val targetClassName: String? = null,
+    val targetBounds: TargetBounds? = null,
+    val cursorX: Int? = targetBounds?.centerX,
+    val cursorY: Int? = targetBounds?.centerY,
+    val packageName: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 enum class ActionType {
     LAUNCH_APP,
     OPEN_URL,

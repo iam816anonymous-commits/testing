@@ -83,9 +83,9 @@ class DeviceActionExecutor(
             ActionType.CHECK_AUTH_STATE -> performAuthCheck(beforeSnapshot)
             ActionType.WAIT -> performWait(action.targetValue)
             ActionType.WAIT_FOR_TEXT, ActionType.VERIFY_TEXT -> performWaitForText(action.targetValue, action.timeoutMs, service)
-            ActionType.CLICK_TEXT -> performClickText(action.targetValue, beforeSnapshot)
+            ActionType.CLICK_TEXT -> performClickText(action.targetValue, service, beforeSnapshot, beforeStateSig)
             ActionType.LONG_CLICK -> performLongClick(action.targetValue, beforeSnapshot)
-            ActionType.TYPE_TEXT -> performTypeText(action.targetValue, action.inputData, beforeSnapshot)
+            ActionType.TYPE_TEXT -> performTypeText(action.targetValue, action.inputData, service, beforeSnapshot)
             ActionType.CLEAR_TEXT -> performClearText(action.targetValue, beforeSnapshot)
             ActionType.PRESS_ENTER, ActionType.SUBMIT_INPUT -> performSubmitInput(service, beforeSnapshot)
             ActionType.SCROLL, ActionType.SCROLL_DOWN -> performScroll(service, beforeSnapshot, forward = true, beforeStateSig = beforeStateSig)
@@ -289,44 +289,102 @@ class DeviceActionExecutor(
         return ActionResult(status = ActionResultStatus.TIMEOUT, reason = ExecutionReason.TIMEOUT, message = "Timeout waiting for '$targetText'")
     }
 
-    private fun performClickText(targetText: String?, snapshot: UiSnapshot): ActionResult {
+    private suspend fun performClickText(
+        targetText: String?,
+        service: AutomationAccessibilityService,
+        snapshot: UiSnapshot,
+        beforeStateSig: String
+    ): ActionResult {
         if (targetText.isNullOrBlank()) return ActionResult(status = ActionResultStatus.FAILED, message = "CLICK_TEXT requires target text")
         val res = actionResolver.resolveTargetWithAmbiguity(snapshot, targetText)
 
         if (res.match == null) {
-            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Text '$targetText' not found")
-        }
-
-        // STRICT AMBIGUOUS TARGET SAFETY: Never blindly select candidate 0 when target is ambiguous!
-        if (res.isAmbiguous) {
-            val redacted = redactSensitiveText(targetText)
-            Log.w(TAG, "AMBIGUOUS_TARGET_CLICK_BLOCKED: Target '$redacted' matched ${res.candidateCount} nodes. Execution strictly blocked.")
-            return ActionResult(
-                status = ActionResultStatus.BLOCKED,
-                reason = ExecutionReason.AMBIGUOUS_TARGET,
-                message = "Target '$redacted' is ambiguous (${res.candidateCount} candidate UI nodes matched)"
-            )
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_NOT_FOUND")
+            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "TARGET_NOT_FOUND: Text '$targetText' not found in active window")
         }
 
         val match = res.match
 
+        if (res.isAmbiguous) {
+            val redacted = redactSensitiveText(targetText)
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=$redacted, candidateCount=${res.candidateCount}, result=AMBIGUOUS_TARGET")
+            return ActionResult(
+                status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.AMBIGUOUS_TARGET,
+                message = "AMBIGUOUS_TARGET: Target '$redacted' matched ${res.candidateCount} candidate UI nodes"
+            )
+        }
+
         if (!match.node.isEnabled) {
-            return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.PRECONDITION_FAILED, message = "Target '$targetText' is disabled")
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_DISABLED")
+            return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.PRECONDITION_FAILED, message = "TARGET_DISABLED: Target '$targetText' is disabled")
         }
 
         val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
-        if (nodeRef != null) {
-            var targetNode: AccessibilityNodeInfo? = nodeRef
-            while (targetNode != null && !targetNode.isClickable) {
-                targetNode = targetNode.parent
-            }
-            if (targetNode != null && targetNode.isClickable) {
-                if (targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                    return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = match.node, matchMethod = match.matchMethod)
-                }
-            }
+            ?: return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Target nodeRef is missing")
+
+        var targetNode: AccessibilityNodeInfo? = nodeRef
+        while (targetNode != null && !targetNode.isClickable) {
+            targetNode = targetNode.parent
         }
-        return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Node found for '$targetText' but click failed")
+
+        if (targetNode == null || !targetNode.isClickable) {
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=DISPATCH_FAILED_NO_CLICKABLE_ANCESTOR")
+            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "DISPATCH_FAILED: Target '$targetText' has no clickable node or parent ancestor")
+        }
+
+        val dispatchResult = targetNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
+        if (!dispatchResult) {
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${snapshot.packageName}, target=${redactSensitiveText(targetText)}, result=DISPATCH_FAILED")
+            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "DISPATCH_FAILED: ACTION_CLICK performAction returned false")
+        }
+
+        // Post-click Verification
+        kotlinx.coroutines.delay(400L)
+        val afterRoot = service.getRootNode()
+        val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+        val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+        val uiChanged = beforeStateSig != afterStateSig
+        val packageChanged = snapshot.packageName != afterSnapshot.packageName
+        val targetStillPresent = actionResolver.resolveTargetWithAmbiguity(afterSnapshot, targetText).match != null
+
+        val finalVerification = if (packageChanged || uiChanged) "VERIFIED_SUCCESS" else "DISPATCH_SUCCEEDED_UNVERIFIED"
+
+        Log.i(
+            TAG,
+            "CLICK_DIAGNOSTIC:\n" +
+                    "  package=${snapshot.packageName}\n" +
+                    "  target=${redactSensitiveText(targetText)}\n" +
+                    "  text=${match.node.text}\n" +
+                    "  contentDescription=${match.node.contentDescription}\n" +
+                    "  viewId=${match.node.viewIdResourceName}\n" +
+                    "  className=${match.node.className}\n" +
+                    "  clickable=${match.node.isClickable}\n" +
+                    "  enabled=${match.node.isEnabled}\n" +
+                    "  visible=${match.node.isVisibleToUser}\n" +
+                    "  focusable=${match.node.isFocusable}\n" +
+                    "  focused=${match.node.isFocused}\n" +
+                    "  bounds=${match.node.boundsInScreen}\n" +
+                    "  resolvedBy=${match.matchMethod}\n" +
+                    "  candidateCount=${res.candidateCount}\n" +
+                    "  dispatchAttempt=ACTION_CLICK\n" +
+                    "  dispatchResult=$dispatchResult\n" +
+                    "  beforeStateSignature=$beforeStateSig\n" +
+                    "  afterStateSignature=$afterStateSig\n" +
+                    "  targetStillPresent=$targetStillPresent\n" +
+                    "  uiChanged=$uiChanged\n" +
+                    "  packageChanged=$packageChanged\n" +
+                    "  finalVerification=$finalVerification"
+        )
+
+        return ActionResult(
+            status = ActionResultStatus.SUCCESS,
+            matchedNode = match.node,
+            matchMethod = match.matchMethod,
+            message = "$finalVerification: Click dispatched (uiChanged=$uiChanged, packageChanged=$packageChanged)"
+        )
     }
 
     private fun performLongClick(targetText: String?, snapshot: UiSnapshot): ActionResult {
@@ -360,7 +418,12 @@ class DeviceActionExecutor(
         return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Long click failed on target '$targetText'")
     }
 
-    private fun performTypeText(targetLabel: String?, inputData: String?, snapshot: UiSnapshot): ActionResult {
+    private suspend fun performTypeText(
+        targetLabel: String?,
+        inputData: String?,
+        service: AutomationAccessibilityService,
+        snapshot: UiSnapshot
+    ): ActionResult {
         val textToType = inputData ?: targetLabel
         if (textToType.isNullOrBlank()) {
             return ActionResult(status = ActionResultStatus.FAILED, message = "TYPE_TEXT requires input text string")
@@ -392,13 +455,31 @@ class DeviceActionExecutor(
         val success = editableNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
         val redactedText = redactSensitiveText(textToType)
 
-        return if (success) {
-            Log.i(TAG, "TEXT_TYPED_SUCCESS: Injected '$redactedText' into editable field")
-            ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = res.match.node, matchMethod = res.match.matchMethod)
-        } else {
-            Log.e(TAG, "TEXT_TYPED_FAILED: Failed to set text on editable field")
-            ActionResult(status = ActionResultStatus.FAILED, message = "Failed to inject text '$redactedText'")
+        if (!success) {
+            Log.e(TAG, "TYPE_TEXT_FAILED: ACTION_SET_TEXT returned false")
+            return ActionResult(status = ActionResultStatus.FAILED, message = "Failed to inject text '$redactedText'")
         }
+
+        // 3. Post-action verification: Re-observe and verify the editable node actually contains the typed text string
+        kotlinx.coroutines.delay(300L)
+        val afterRoot = service.getRootNode()
+        val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+        val verifiedEditable = afterSnapshot.editableNodes.firstOrNull { it.text?.contains(textToType) == true }
+
+        val verificationStatusMessage = if (verifiedEditable != null) {
+            "VERIFIED_SUCCESS: Text '$redactedText' confirmed in editable view"
+        } else {
+            "DISPATCH_SUCCEEDED_UNVERIFIED: Text injection dispatched but text string unconfirmed in post-observation"
+        }
+
+        Log.i(TAG, "TYPE_TEXT_DIAGNOSTIC: $verificationStatusMessage")
+
+        return ActionResult(
+            status = ActionResultStatus.SUCCESS,
+            matchedNode = res.match.node,
+            matchMethod = res.match.matchMethod,
+            message = verificationStatusMessage
+        )
     }
 
     private fun performClearText(targetLabel: String?, snapshot: UiSnapshot): ActionResult {

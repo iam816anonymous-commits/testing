@@ -92,4 +92,52 @@ class GenericActionExecutorTest {
         assertEquals(TargetResolutionStatus.NOT_FOUND, res.status)
         assertEquals(0, res.candidateCount)
     }
+
+    @Test
+    fun testAccessibilityObservationProvider_DynamicServiceProvider() {
+        var mockService: AutomationAccessibilityService? = null
+        val provider = AccessibilityObservationProvider(serviceProvider = { mockService })
+
+        // When service is null, return acc_disabled summary
+        kotlinx.coroutines.runBlocking {
+            val obsDisabled = provider.captureObservation()
+            assertEquals("acc_disabled", obsDisabled.stateSignature)
+            assertTrue(obsDisabled.summary.contains("connected = false"))
+        }
+    }
+
+    @Test
+    fun testTargetResolution_DisabledTarget_NotActionable() {
+        val disabledSnapshot = UiSnapshot(
+            packageName = "com.mock.settings",
+            allNodes = listOf(
+                UiNodeInfo(text = "Network & internet", isEnabled = false, isClickable = true)
+            )
+        )
+
+        val res = mockResolver.resolveTargetWithAmbiguity(disabledSnapshot, "Network & internet")
+
+        assertNotNull(res.match)
+        assertEquals(TargetResolutionStatus.NOT_ACTIONABLE, res.status)
+    }
+
+    @Test
+    fun testTargetBounds_CenterXCenterYWidthHeight() {
+        val bounds = TargetBounds(left = 100, top = 200, right = 500, bottom = 400)
+
+        assertEquals(300, bounds.centerX)
+        assertEquals(300, bounds.centerY)
+        assertEquals(400, bounds.width)
+        assertEquals(200, bounds.height)
+
+        val visState = AutomationVisualizationState(
+            actionState = VisualizationActionState.CLICKING,
+            targetText = "Network & internet",
+            targetBounds = bounds
+        )
+
+        assertEquals(300, visState.cursorX)
+        assertEquals(300, visState.cursorY)
+        assertEquals(VisualizationActionState.CLICKING, visState.actionState)
+    }
 }

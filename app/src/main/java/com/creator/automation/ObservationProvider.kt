@@ -6,18 +6,19 @@ interface ObservationProvider {
 }
 
 class AccessibilityObservationProvider(
-    private val service: AutomationAccessibilityService? = AutomationAccessibilityService.instance
+    private val serviceProvider: () -> AutomationAccessibilityService? = { AutomationAccessibilityService.instance }
 ) : ObservationProvider {
 
     override fun getSource(): ObservationSource = ObservationSource.ACCESSIBILITY
 
     override suspend fun captureObservation(): CurrentObservation {
+        val service = serviceProvider()
         if (service == null) {
             return CurrentObservation(
                 source = ObservationSource.ACCESSIBILITY,
                 packageName = "unknown",
                 stateSignature = "acc_disabled",
-                summary = "AccessibilityService is disabled",
+                summary = "AccessibilityService:\nconnected = false\nserviceInstance = null\ncanRetrieveWindowContent = false\ncanPerformGestures = false\nactiveWindow = false\npackage = unknown\nlastAccessibilityEvent = None\nlastEventTime = 0",
                 confidence = 0.0
             )
         }

@@ -32,6 +32,9 @@ class AutomationAccessibilityService : AccessibilityService() {
         private val _lastAccessibilityEvent = MutableStateFlow<String>("None")
         val lastAccessibilityEvent: StateFlow<String> = _lastAccessibilityEvent.asStateFlow()
 
+        private val _lastEventTimestamp = MutableStateFlow<Long>(0L)
+        val lastEventTimestamp: StateFlow<Long> = _lastEventTimestamp.asStateFlow()
+
         private val _currentLearningMode = MutableStateFlow(LearningMode.IDLE)
         val currentLearningMode: StateFlow<LearningMode> = _currentLearningMode.asStateFlow()
 
@@ -59,6 +62,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         val eventTypeName = AccessibilityEvent.eventTypeToString(event.eventType)
         val pkg = event.packageName?.toString()
 
+        _lastEventTimestamp.value = System.currentTimeMillis()
         _lastAccessibilityEvent.value = "$eventTypeName ($pkg)"
 
         if (!pkg.isNullOrBlank() && pkg != "com.creator.automation") {
@@ -137,6 +141,23 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
         _isServiceEnabled.value = false
         Log.i(TAG, "AutomationAccessibilityService destroyed")
+    }
+
+    /**
+     * Diagnostic representation of actual AccessibilityService runtime state.
+     */
+    fun getDiagnosticsSummary(): String {
+        val root = rootInActiveWindow
+        val info = serviceInfo
+        return "AccessibilityService:\n" +
+                "connected = true\n" +
+                "serviceInstance = ${this.javaClass.simpleName}\n" +
+                "canRetrieveWindowContent = ${info?.canRetrieveWindowContent ?: true}\n" +
+                "canPerformGestures = ${Build.VERSION.SDK_INT >= Build.VERSION_CODES.N}\n" +
+                "activeWindow = ${root != null}\n" +
+                "package = ${root?.packageName ?: _activePackageName.value ?: "unknown"}\n" +
+                "lastAccessibilityEvent = ${_lastAccessibilityEvent.value}\n" +
+                "lastEventTime = ${_lastEventTimestamp.value}"
     }
 
     /**
