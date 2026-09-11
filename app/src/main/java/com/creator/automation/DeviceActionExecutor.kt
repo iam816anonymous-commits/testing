@@ -91,9 +91,9 @@ class DeviceActionExecutor(
             ActionType.SCROLL, ActionType.SCROLL_DOWN -> performScroll(service, beforeSnapshot, forward = true, beforeStateSig = beforeStateSig)
             ActionType.SCROLL_UP -> performScroll(service, beforeSnapshot, forward = false, beforeStateSig = beforeStateSig)
             ActionType.GO_BACK -> performGoBack(service)
-            ActionType.PRESS_HOME -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_HOME, "HOME")
-            ActionType.PRESS_RECENTS -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_RECENTS, "RECENTS")
-            ActionType.CAPTURE_SCREEN -> performCaptureScreen(service, beforeSnapshot)
+            ActionType.PRESS_HOME -> performGlobalHome(service)
+            ActionType.PRESS_RECENTS -> performGlobalRecents(service)
+            ActionType.CAPTURE_SCREEN -> performCaptureScreen(service, screenObservationProvider)
             ActionType.READ_VISIBLE_UI, ActionType.REFRESH_OBSERVATION -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
             else -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
         }
@@ -662,22 +662,25 @@ class DeviceActionExecutor(
     }
 
     private fun performGoBack(service: AutomationAccessibilityService): ActionResult {
-        return if (service.performGoBack()) ActionResult(status = ActionResultStatus.SUCCESS)
+        return if (AndroidAutomationCompat.performGlobalBack(service)) ActionResult(status = ActionResultStatus.SUCCESS)
         else ActionResult(status = ActionResultStatus.FAILED, message = "GO_BACK failed")
     }
 
-    private fun performGlobalAction(service: AutomationAccessibilityService, actionId: Int, actionName: String): ActionResult {
-        return if (service.performGlobalAction(actionId)) ActionResult(status = ActionResultStatus.SUCCESS, message = "Global action $actionName executed")
-        else ActionResult(status = ActionResultStatus.FAILED, message = "Global action $actionName failed")
+    private fun performGlobalHome(service: AutomationAccessibilityService): ActionResult {
+        return if (AndroidAutomationCompat.performGlobalHome(service)) ActionResult(status = ActionResultStatus.SUCCESS, message = "Global action HOME executed")
+        else ActionResult(status = ActionResultStatus.FAILED, message = "Global action HOME failed")
     }
 
-    private suspend fun performCaptureScreen(service: AutomationAccessibilityService, snapshot: UiSnapshot): ActionResult {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
-            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UNSUPPORTED_ANDROID_VERSION, message = "Requires Android 11+")
-        }
-        val path = service.captureScreenshot()
-        return if (path != null) ActionResult(status = ActionResultStatus.SUCCESS, screenshotPath = path)
-        else ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.SCREENSHOT_FAILED, message = "Screenshot capture failed")
+    private fun performGlobalRecents(service: AutomationAccessibilityService): ActionResult {
+        return if (AndroidAutomationCompat.performGlobalRecents(service)) ActionResult(status = ActionResultStatus.SUCCESS, message = "Global action RECENTS executed")
+        else ActionResult(status = ActionResultStatus.FAILED, message = "Global action RECENTS failed")
+    }
+
+    private suspend fun performCaptureScreen(
+        service: AutomationAccessibilityService,
+        screenProvider: ObservationProvider?
+    ): ActionResult {
+        return AndroidAutomationCompat.captureScreenshotCompat(service, context, screenProvider)
     }
 }
 

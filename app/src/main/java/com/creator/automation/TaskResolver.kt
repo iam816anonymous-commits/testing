@@ -133,7 +133,60 @@ class TaskResolver(
     fun generateGenericWorkflowForTask(taskDescription: String): Workflow? {
         val descLower = taskDescription.trim().lowercase()
 
-        // Extract app name query (e.g. "open chrome and search...", "launch whatsapp", "open youtube")
+        // 1. Direct System Navigation Commands (GO_HOME, GO_BACK, PRESS_RECENTS)
+        if (descLower == "go home" || descLower == "press home" || descLower == "home" || descLower == "navigate home") {
+            return Workflow(
+                id = "system_home_${System.currentTimeMillis()}",
+                name = "System Home Navigation",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.PRESS_HOME, semantics = ActionSemantics.REPEATABLE)
+                    )
+                )
+            )
+        }
+
+        if (descLower == "go back" || descLower == "press back" || descLower == "back" || descLower == "navigate back") {
+            return Workflow(
+                id = "system_back_${System.currentTimeMillis()}",
+                name = "System Back Navigation",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.GO_BACK, semantics = ActionSemantics.REPEATABLE)
+                    )
+                )
+            )
+        }
+
+        if (descLower == "recents" || descLower == "open recents" || descLower == "press recents" || descLower == "app switcher") {
+            return Workflow(
+                id = "system_recents_${System.currentTimeMillis()}",
+                name = "System Recents Navigation",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.PRESS_RECENTS, semantics = ActionSemantics.REPEATABLE)
+                    )
+                )
+            )
+        }
+
+        if (descLower.contains("read") && (descLower.contains("screen") || descLower.contains("ui"))) {
+            return Workflow(
+                id = "system_read_screen_${System.currentTimeMillis()}",
+                name = "Read Screen Perception",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.READ_VISIBLE_UI, semantics = ActionSemantics.READ_ONLY)
+                    )
+                )
+            )
+        }
+
+        // 2. Extract app name query (e.g. "open chrome and search...", "launch whatsapp", "open youtube", "open settings")
         var targetAppName: String? = null
         if (descLower.startsWith("open ") || descLower.startsWith("launch ")) {
             val afterVerb = taskDescription.substring(descLower.indexOf(" ") + 1).trim()
@@ -143,6 +196,8 @@ class TaskResolver(
             } else if (words.isNotEmpty()) {
                 words[0]
             } else null
+        } else if (descLower == "settings") {
+            targetAppName = "settings"
         }
 
         if (targetAppName.isNullOrBlank()) return null
