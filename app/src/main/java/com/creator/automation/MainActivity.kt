@@ -11,8 +11,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,7 +48,309 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    DiagnosticControlCenter(context = this)
+                    MainAgentApp(context = this)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MainAgentApp(context: Context) {
+    var selectedMainTab by remember { mutableIntStateOf(0) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Main Navigation Bar
+        TabRow(selectedTabIndex = selectedMainTab) {
+            Tab(
+                selected = selectedMainTab == 0,
+                onClick = { selectedMainTab = 0 },
+                text = { Text("Agent Command", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            )
+            Tab(
+                selected = selectedMainTab == 1,
+                onClick = { selectedMainTab = 1 },
+                text = { Text("Task History", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            )
+            Tab(
+                selected = selectedMainTab == 2,
+                onClick = { selectedMainTab = 2 },
+                text = { Text("Capabilities", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            )
+            Tab(
+                selected = selectedMainTab == 3,
+                onClick = { selectedMainTab = 3 },
+                text = { Text("Diagnostics", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+            )
+        }
+
+        when (selectedMainTab) {
+            0 -> AgentCommandScreen(context = context)
+            1 -> UserTaskHistoryScreen(context = context)
+            2 -> UserCapabilitiesScreen(context = context)
+            3 -> DiagnosticControlCenter(context = context)
+        }
+    }
+}
+
+@Composable
+fun AgentCommandScreen(context: Context) {
+    val coroutineScope = rememberCoroutineScope()
+
+    val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
+    val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
+    val agentState by AgentCore.agentState.collectAsState()
+    val overlayState by AutomationOverlayState.currentState.collectAsState()
+
+    var userCommandText by remember { mutableStateOf("") }
+    var currentTaskGoal by remember { mutableStateOf<String?>(null) }
+    var lastStepResult by remember { mutableStateOf<AgentStepResult?>(null) }
+    var isExecuting by remember { mutableStateOf(false) }
+    var isDetailsExpanded by remember { mutableStateOf(false) }
+
+    val agentCore = remember { AgentCore(context) }
+    val scrollState = rememberScrollState()
+
+    val suggestions = listOf(
+        "Open Chrome and search for new Telugu movies",
+        "Open YouTube",
+        "Go back",
+        "Open Settings",
+        "Read what is currently on the screen",
+        "Turn on the flashlight"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(scrollState),
+        verticalArrangement = Arrangement.Top
+    ) {
+        // App Title
+        Text(
+            text = "CREATOR AUTOMATION",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text = "What can I do for you?",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Command Box
+        OutlinedTextField(
+            value = userCommandText,
+            onValueChange = { userCommandText = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Type a task...") },
+            placeholder = { Text("e.g. Open Chrome and search for new Telugu movies") },
+            shape = RoundedCornerShape(12.dp),
+            maxLines = 3
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Command Action Row (Mic & Send Button)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = {
+                    // Voice input preparation - fills text field with voice placeholder
+                    userCommandText = "Open Chrome and search for new Telugu movies"
+                },
+                modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+            ) {
+                Text("🎤", fontSize = 18.sp)
+            }
+
+            Button(
+                onClick = {
+                    if (userCommandText.isNotBlank()) {
+                        val task = userCommandText.trim()
+                        currentTaskGoal = task
+                        isExecuting = true
+                        coroutineScope.launch {
+                            val res = agentCore.executeTaskStep(task)
+                            lastStepResult = res
+                            isExecuting = false
+                        }
+                    }
+                },
+                enabled = userCommandText.isNotBlank() && !isExecuting,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(if (isExecuting) "Executing..." else "Send", fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Suggestion Chips
+        Text("Suggestions:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray)
+        Spacer(modifier = Modifier.height(4.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            suggestions.chunked(2).forEach { row ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { chipText ->
+                        SuggestionChip(
+                            onClick = {
+                                userCommandText = chipText
+                            },
+                            label = { Text(chipText, fontSize = 10.sp) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Live Execution Conversation Card
+        if (currentTaskGoal != null) {
+            Text("CONVERSATIONAL EXECUTION", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // User Message Card
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("USER", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color(0xFF1565C0))
+                    Text(currentTaskGoal!!, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            // Agent Message Card
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F8E9))
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("AGENT", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color(0xFF2E7D32))
+                    Text("I'll $currentTaskGoal.", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Compact Live Agent Status Box
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFEDE7F6))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Task: ${currentTaskGoal}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(agentState.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF512DA8))
+                    }
+                    Text("App: ${overlayState.packageName ?: "System"}", fontSize = 11.sp)
+                    Text("Current Action: ${overlayState.actionState.name} ${overlayState.targetText ?: ""}", fontSize = 11.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Expandable "What I'm doing" Section
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { isDetailsExpanded = !isDetailsExpanded },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("What I'm doing", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFFE65100))
+                        Text(if (isDetailsExpanded) "▲ Hide" else "▼ Expand", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                    }
+
+                    if (isDetailsExpanded) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Observation: Active UI window captured", fontSize = 10.sp)
+                        Text("Target: ${overlayState.targetText ?: "Auto-resolved target"}", fontSize = 10.sp)
+                        Text("Action: ${overlayState.actionState.name}", fontSize = 10.sp)
+                        Text("Verification: Post-action state signature comparison", fontSize = 10.sp)
+                        Text("Recovery: Bounded generic retry active", fontSize = 10.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Result Cards
+            if (lastStepResult != null) {
+                val stepRes = lastStepResult!!
+                if (stepRes.nextState == AgentState.COMPLETED) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("✓ TASK COMPLETED", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2E7D32))
+                            Text(stepRes.decisionReason ?: "Task completed successfully.", fontSize = 11.sp)
+                        }
+                    }
+                } else if (stepRes.nextState == AgentState.PAUSED || stepRes.nextState == AgentState.FAILED) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("✕ COULDN'T COMPLETE TASK", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFC62828))
+                            Text(stepRes.decisionReason ?: "Unable to verify task completion.", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UserTaskHistoryScreen(context: Context) {
+    val logs by AgentRuntimeManager.runtimeLogs.collectAsState()
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("TASK HISTORY", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (logs.isEmpty()) {
+            Text("No prior task history recorded.", fontSize = 11.sp, color = Color.Gray)
+        } else {
+            logs.take(20).forEach { log ->
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(log, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UserCapabilitiesScreen(context: Context) {
+    val scanner = remember { DeviceCapabilityScanner(context) }
+    val profile = remember { scanner.scanDeviceProfile() }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("DEVICE CAPABILITIES", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+        Text("${profile.manufacturer} ${profile.model} (API ${profile.apiLevel})", fontSize = 11.sp, color = Color.Gray)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        profile.capabilityMappings.forEach { cap ->
+            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(cap.name, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("Hardware: ${cap.hardwareState} | Permission: ${cap.permissionState}", fontSize = 10.sp)
+                    Text("Operation: ${cap.operationState} | Verification: ${cap.verificationState}", fontSize = 10.sp)
                 }
             }
         }
@@ -205,13 +511,25 @@ fun DiagnosticControlCenter(context: Context) {
                 onRunFailedTests = {
                     coroutineScope.launch {
                         isTestRunning = true
-                        val failedIds = testResults.filter { it.status == PhysicalTestStatus.FAIL || it.status == PhysicalTestStatus.ERROR }.map { it.testId }.toSet()
-                        val suite = PhysicalTestRegistry.buildSafeValidationSuite().filter { failedIds.contains(it.testId) }
+                        val failedIds = HashSet<String>()
+                        testResults.forEach { res ->
+                            if (res.status == PhysicalTestStatus.FAIL || res.status == PhysicalTestStatus.ERROR) {
+                                failedIds.add(res.testId)
+                            }
+                        }
+                        val fullSuite = PhysicalTestRegistry.buildSafeValidationSuite()
+                        val suite = mutableListOf<PhysicalTestCase>()
+                        fullSuite.forEach { case ->
+                            if (failedIds.contains(case.testId)) {
+                                suite.add(case)
+                            }
+                        }
                         if (suite.isNotEmpty()) {
                             withContext(Dispatchers.IO) {
                                 val reRunResults = testRunner.executeSuite(suite)
-                                val updatedMap = testResults.associateBy { it.testId }.toMutableMap()
-                                reRunResults.forEach { updatedMap[it.testId] = it }
+                                val updatedMap = HashMap<String, TestResult>()
+                                testResults.forEach { res -> updatedMap[res.testId] = res }
+                                reRunResults.forEach { res -> updatedMap[res.testId] = res }
                                 testResults = updatedMap.values.toList()
                                 exportedReportFiles = reportGenerator.generateAndExportReports(deviceProfile, testResults)
                             }
