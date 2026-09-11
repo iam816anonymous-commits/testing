@@ -42,6 +42,32 @@ data class GoalModel(
                 )
             }
 
+            // Multi-step Compound Intent: "Open <App> and search for <Text>"
+            if ((lower.startsWith("open ") || lower.startsWith("launch ") || lower.startsWith("start ")) &&
+                (lower.contains(" and search") || lower.contains(" and query"))) {
+                val appPart = trimmed.substringAfterIgnoreCase("open ")
+                    .substringAfterIgnoreCase("launch ")
+                    .substringAfterIgnoreCase("start ")
+                    .substringBeforeIgnoreCase(" and ").trim()
+
+                val searchPart = if (lower.contains("search for ")) {
+                    trimmed.substringAfterIgnoreCase("search for ").trim()
+                } else if (lower.contains("search ")) {
+                    trimmed.substringAfterIgnoreCase("search ").trim()
+                } else {
+                    trimmed.substringAfterIgnoreCase("query ").trim()
+                }
+
+                return GoalModel(
+                    rawUserIntent = trimmed,
+                    normalizedObjective = trimmed,
+                    targetAppQuery = appPart,
+                    expectedTextInResult = searchPart,
+                    requestedActionType = null,
+                    requestedActionTarget = null
+                )
+            }
+
             // 2. Generic App Launch Intent Extraction (no hardcoded app maps)
             val targetApp = when {
                 lower.startsWith("open ") && !lower.contains(" in ") -> trimmed.substringAfterIgnoreCase("open ").trim()
