@@ -38,9 +38,20 @@ class DeviceCapabilityScannerTest {
         val permissions = scanner.scanPermissions()
 
         assertFalse(permissions.isEmpty())
+
+        // 1. Internet permission is normal protection level: declared AND granted
         val internetPerm = permissions.find { it.permission == android.Manifest.permission.INTERNET }
         assertNotNull(internetPerm)
         assertTrue(internetPerm!!.isDeclared)
+        assertTrue(internetPerm.isGranted)
+        assertTrue(internetPerm.isUsable)
+
+        // 2. Camera permission is dangerous protection level: declared BUT NOT granted by default
+        val cameraPerm = permissions.find { it.permission == android.Manifest.permission.CAMERA }
+        assertNotNull(cameraPerm)
+        assertTrue(cameraPerm!!.isDeclared)
+        assertFalse(cameraPerm.isGranted)
+        assertFalse(cameraPerm.isUsable)
     }
 
     @Test
