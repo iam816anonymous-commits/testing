@@ -1,6 +1,7 @@
 package com.creator.automation
 
 import android.content.Context
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -182,7 +183,10 @@ object PhysicalTestRegistry {
                     val isAcc = AutomationAccessibilityService.isServiceEnabled.value
                     trace.add("Accessibility active: $isAcc")
 
-                    val nodeCount = AutomationAccessibilityService.cachedNodeTree?.size ?: 0
+                    val service = AutomationAccessibilityService.instance
+                    val root = service?.getRootNode()
+                    val snapshot = ActionResolver.captureSnapshot(root, ctx.packageName)
+                    val nodeCount = snapshot.totalNodeCount
                     trace.add("Nodes captured: $nodeCount")
 
                     val status = when {
@@ -204,7 +208,7 @@ object PhysicalTestRegistry {
                         targetResolution = "Root Node Tree",
                         candidateCount = nodeCount,
                         selectedTarget = "Root Window",
-                        mechanismUsed = "AccessibilityNodeInfo Tree Traverse",
+                        mechanismUsed = "ActionResolver.captureSnapshot",
                         observationBefore = "Pre-check service active",
                         observationAfter = "Captured $nodeCount accessibility nodes",
                         expectedOutcome = "Non-empty accessibility node hierarchy extracted",
@@ -229,20 +233,19 @@ object PhysicalTestRegistry {
                     val trace = mutableListOf<String>()
                     trace.add("Testing target candidate resolution")
 
-                    val mockObservation = ObservationModel(
+                    val mockSnapshot = UiSnapshot(
                         packageName = ctx.packageName,
-                        activityName = "MainActivity",
-                        nodes = listOf(
-                            UiNodeModel(id = "1", text = "Open Settings", viewIdResourceName = "btn_1", bounds = android.graphics.Rect(0, 0, 100, 100)),
-                            UiNodeModel(id = "2", text = "Open Settings", viewIdResourceName = "btn_2", bounds = android.graphics.Rect(0, 100, 100, 200))
+                        allNodes = listOf(
+                            UiNodeInfo(text = "Open Settings", viewIdResourceName = "btn_1", isVisibleToUser = true, isEnabled = true),
+                            UiNodeInfo(text = "Open Settings", viewIdResourceName = "btn_2", isVisibleToUser = true, isEnabled = true)
                         )
                     )
 
-                    val target = ActionTarget(exactText = "Open Settings")
-                    val candidates = ActionResolver.findCandidates(mockObservation, target)
-                    trace.add("Candidates found for 'Open Settings': ${candidates.size}")
+                    val resolver = ActionResolver()
+                    val res = resolver.resolveTargetWithAmbiguity(mockSnapshot, "Open Settings")
+                    trace.add("Candidates found for 'Open Settings': ${res.candidateCount}")
 
-                    val status = if (candidates.size == 2) PhysicalTestStatus.PASS else PhysicalTestStatus.FAIL
+                    val status = if (res.candidateCount == 2 && res.isAmbiguous) PhysicalTestStatus.PASS else PhysicalTestStatus.FAIL
 
                     TestResult(
                         testId = "TEST-RES-001",
@@ -255,13 +258,13 @@ object PhysicalTestRegistry {
                         deviceStateSummary = "ActionResolver resolution engine active",
                         actionAttempted = "Resolve ambiguous target 'Open Settings'",
                         targetResolution = "Exact Text Target Resolution",
-                        candidateCount = candidates.size,
-                        selectedTarget = candidates.firstOrNull()?.node?.id,
-                        mechanismUsed = "ActionResolver.findCandidates()",
+                        candidateCount = res.candidateCount,
+                        selectedTarget = res.match?.node?.viewIdResourceName,
+                        mechanismUsed = "ActionResolver.resolveTargetWithAmbiguity",
                         observationBefore = "2 duplicate text nodes in observation",
-                        observationAfter = "Resolved ${candidates.size} candidate nodes",
+                        observationAfter = "Resolved ${res.candidateCount} candidate nodes (Ambiguous: ${res.isAmbiguous})",
                         expectedOutcome = "Detect exactly 2 ambiguous candidates",
-                        actualOutcome = "Found ${candidates.size} candidates",
+                        actualOutcome = "Found ${res.candidateCount} candidates",
                         dispatchResult = "RESOLVE_COMPLETE",
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
                         failureReason = if (status != PhysicalTestStatus.PASS) "Target candidate count mismatch" else null,
@@ -324,17 +327,22 @@ object PhysicalTestRegistry {
                     trace.add("Invoking WaitEngine with non-existent text condition (timeout = 200ms)")
 
                     val waitEngine = WaitEngine()
-                    val result = waitEngine.waitForCondition(
-                        condition = WaitCondition.TextAppeared("NON_EXISTENT_TEXT_XYZ_123"),
+                    val condition = WaitCondition(
+                        type = WaitConditionType.WAIT_FOR_TEXT,
+                        expectedValue = "NON_EXISTENT_TEXT_XYZ_123",
                         timeoutMs = 200L,
-                        pollIntervalMs = 50L,
-                        observationFetcher = {
-                            ObservationModel(packageName = ctx.packageName, activityName = "MainActivity", nodes = emptyList())
-                        }
+                        pollIntervalMs = 50L
                     )
 
-                    trace.add("WaitEngine result: ${result.name}")
-                    val status = if (result == WaitResult.TIMEOUT) PhysicalTestStatus.PASS else PhysicalTestStatus.FAIL
+                    val result = runBlocking {
+                        waitEngine.waitUntil(
+                            condition = condition,
+                            service = AutomationAccessibilityService.instance
+                        )
+                    }
+
+                    trace.add("WaitEngine result: success=${result.success}, reason=${result.failureReason}")
+                    val status = if (!result.success && result.failureReason?.contains("Timeout") == true) PhysicalTestStatus.PASS else PhysicalTestStatus.FAIL
 
                     TestResult(
                         testId = "TEST-VER-001",
@@ -346,14 +354,14 @@ object PhysicalTestRegistry {
                         preconditions = "WaitEngine active",
                         deviceStateSummary = "System clock responsive",
                         actionAttempted = "Wait for missing text with 200ms timeout",
-                        targetResolution = "TextAppeared condition",
+                        targetResolution = "WaitCondition WAIT_FOR_TEXT",
                         candidateCount = 0,
                         selectedTarget = null,
-                        mechanismUsed = "WaitEngine.waitForCondition",
+                        mechanismUsed = "WaitEngine.waitUntil",
                         observationBefore = "Condition unsatisfied",
                         observationAfter = "Condition timed out as expected",
-                        expectedOutcome = "Return WaitResult.TIMEOUT after 200ms",
-                        actualOutcome = "Returned result: ${result.name}",
+                        expectedOutcome = "Return failure with timeout reason after 200ms",
+                        actualOutcome = "Returned result: success=${result.success}, reason=${result.failureReason}",
                         dispatchResult = "WAIT_TIMED_OUT",
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
                         failureReason = if (status != PhysicalTestStatus.PASS) "WaitEngine did not timeout correctly" else null,
@@ -363,58 +371,62 @@ object PhysicalTestRegistry {
             )
         )
 
-        // 5. Recovery - Safe Bounded Retry Validation
+        // 5. Recovery - RecoveryManager Evaluation Test
         tests.add(
             PhysicalTestCase(
                 testId = "TEST-REC-001",
-                testName = "RecoveryManager Bounded Retry Counter",
+                testName = "RecoveryManager Evaluation Boundaries",
                 category = PhysicalTestCategory.RECOVERY,
                 executeBlock = { ctx ->
                     val start = System.currentTimeMillis()
                     val trace = mutableListOf<String>()
-                    trace.add("Testing RecoveryManager retry counter boundaries")
+                    trace.add("Testing RecoveryManager retry vs pause boundaries")
 
-                    val recMgr = RecoveryManager()
-                    var attempts = 0
-                    val canRetry1 = recMgr.shouldRetry("TEST_ACTION", maxAttempts = 3)
-                    recMgr.recordFailure("TEST_ACTION")
-                    attempts++
+                    val recMgr = RecoveryManager(maxRetriesPerStep = 2)
 
-                    val canRetry2 = recMgr.shouldRetry("TEST_ACTION", maxAttempts = 3)
-                    recMgr.recordFailure("TEST_ACTION")
-                    attempts++
+                    // Failed step count 0 (under limit) -> RETRY
+                    val failedRes = ActionResult(
+                        status = ActionResultStatus.FAILED,
+                        reason = ExecutionReason.UI_NOT_FOUND,
+                        message = "Element missing"
+                    )
+                    val outcome1 = recMgr.evaluateRecovery(failedStepCount = 0, lastActionResult = failedRes)
 
-                    val canRetry3 = recMgr.shouldRetry("TEST_ACTION", maxAttempts = 3)
-                    recMgr.recordFailure("TEST_ACTION")
-                    attempts++
+                    // Failed step count 2 (reaches limit) -> FAIL
+                    val outcome2 = recMgr.evaluateRecovery(failedStepCount = 2, lastActionResult = failedRes)
 
-                    val canRetry4 = recMgr.shouldRetry("TEST_ACTION", maxAttempts = 3)
+                    // Non-idempotent action -> PAUSE
+                    val outcome3 = recMgr.evaluateRecovery(failedStepCount = 0, lastActionResult = failedRes, actionSemantics = ActionSemantics.NON_IDEMPOTENT)
 
-                    trace.add("Retry checks: $canRetry1, $canRetry2, $canRetry3 -> 4th: $canRetry4")
-                    val status = if (canRetry1 && canRetry2 && canRetry3 && !canRetry4) PhysicalTestStatus.PASS else PhysicalTestStatus.FAIL
+                    trace.add("Outcomes: step0=$outcome1, step2=$outcome2, nonIdempotent=$outcome3")
+                    val status = if (outcome1 == RecoveryOutcome.RETRY && outcome2 == RecoveryOutcome.FAIL && outcome3 == RecoveryOutcome.PAUSE) {
+                        PhysicalTestStatus.PASS
+                    } else {
+                        PhysicalTestStatus.FAIL
+                    }
 
                     TestResult(
                         testId = "TEST-REC-001",
-                        testName = "RecoveryManager Bounded Retry Counter",
+                        testName = "RecoveryManager Evaluation Boundaries",
                         category = PhysicalTestCategory.RECOVERY,
                         startTime = start,
                         endTime = System.currentTimeMillis(),
                         status = status,
                         preconditions = "RecoveryManager active",
-                        deviceStateSummary = "Local in-memory retry tracking",
-                        actionAttempted = "Simulate 3 action failures",
-                        targetResolution = "Retry Bound Verification",
+                        deviceStateSummary = "Recovery evaluation rules active",
+                        actionAttempted = "Evaluate recovery outcomes",
+                        targetResolution = "Recovery Boundary Check",
                         candidateCount = 1,
-                        selectedTarget = "TEST_ACTION",
-                        mechanismUsed = "RecoveryManager.shouldRetry()",
-                        observationBefore = "0 failure records",
-                        observationAfter = "3 failure records logged, 4th retry denied",
-                        expectedOutcome = "Permit 3 retries, deny 4th retry",
-                        actualOutcome = "Permitted $attempts retries, 4th retry allowed = $canRetry4",
-                        dispatchResult = "RETRY_BOUND_ENFORCED",
+                        selectedTarget = "RecoveryRules",
+                        mechanismUsed = "RecoveryManager.evaluateRecovery",
+                        observationBefore = "0 failure count",
+                        observationAfter = "Outcomes verified: RETRY, FAIL, PAUSE",
+                        expectedOutcome = "Return RETRY under limit, FAIL at limit, PAUSE for non-idempotent",
+                        actualOutcome = "step0=$outcome1, step2=$outcome2, nonIdempotent=$outcome3",
+                        dispatchResult = "RECOVERY_EVALUATED",
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
-                        failureReason = if (status != PhysicalTestStatus.PASS) "Retry limit boundary failure" else null,
-                        recoveryAttempts = attempts,
+                        failureReason = if (status != PhysicalTestStatus.PASS) "RecoveryManager boundary mismatch" else null,
+                        recoveryAttempts = 1,
                         diagnosticTrace = trace
                     )
                 }
@@ -429,27 +441,7 @@ object PhysicalTestRegistry {
                 category = PhysicalTestCategory.INPUT_INTERACTION,
                 requiresUserApproval = true,
                 executeBlock = { ctx ->
-                    TestResult(
-                        testId = "TEST-SAF-001",
-                        testName = "External Side-Effect Safety Interlock",
-                        category = PhysicalTestCategory.INPUT_INTERACTION,
-                        startTime = System.currentTimeMillis(),
-                        endTime = System.currentTimeMillis(),
-                        status = PhysicalTestStatus.PASS,
-                        preconditions = "User explicitly approved side effect test",
-                        deviceStateSummary = "User approved",
-                        actionAttempted = "Execute approved side effect",
-                        targetResolution = "User Granted",
-                        candidateCount = 1,
-                        selectedTarget = "APPROVED_TARGET",
-                        mechanismUsed = "Approved Execution",
-                        observationBefore = "User prompt shown",
-                        observationAfter = "Side effect executed",
-                        expectedOutcome = "Execute with approval",
-                        actualOutcome = "Executed",
-                        dispatchResult = "SUCCESS",
-                        verificationResult = "VERIFIED_SUCCESS"
-                    )
+                    throw IllegalStateException("Should not execute unapproved block")
                 }
             )
         )

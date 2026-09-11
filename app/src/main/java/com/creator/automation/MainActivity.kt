@@ -1,5 +1,6 @@
 package com.creator.automation
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
@@ -80,7 +81,7 @@ fun DiagnosticControlCenter(context: Context) {
     val screenCaptureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             ScreenObservationProvider.setScreenCaptureAuthorization(
                 context = context,
                 resultCode = result.resultCode,
@@ -263,7 +264,7 @@ fun OverviewScreen(
                 StatusRow("Accessibility Automation", if (isAccessibilityEnabled) "AVAILABLE" else "DISABLED", isAccessibilityEnabled)
                 StatusRow("MediaProjection Capture", if (isScreenAuthorized) "AVAILABLE" else "NOT_GRANTED", isScreenAuthorized)
                 StatusRow("Camera Vision (CameraX)", if (isCameraRunning) "RUNNING" else "INACTIVE", isCameraRunning)
-                StatusRow("Agent Loop State", agentState.name, agentState == AgentState.RUNNING || agentState == AgentState.IDLE)
+                StatusRow("Agent Loop State", agentState.name, agentState == AgentState.EXECUTING || agentState == AgentState.IDLE)
             }
         }
 
