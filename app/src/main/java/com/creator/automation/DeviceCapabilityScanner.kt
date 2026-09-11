@@ -189,6 +189,28 @@ class DeviceCapabilityScanner(private val context: Context) {
             android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
             android.Manifest.permission.READ_EXTERNAL_STORAGE
         )
+
+        /**
+         * Evaluates raw permission state parameters into a deterministic [PermissionState] model.
+         * Enforces that a permission is usable only if it is both declared and granted.
+         */
+        fun evaluatePermissionState(
+            permission: String,
+            declaredPermissions: Set<String>,
+            isGranted: Boolean,
+            isRuntimeApplicable: Boolean,
+            isRequired: Boolean = true
+        ): PermissionState {
+            val isDeclared = declaredPermissions.contains(permission)
+            return PermissionState(
+                permission = permission,
+                isDeclared = isDeclared,
+                isGranted = isGranted,
+                isRequired = isRequired,
+                isRuntimeApplicable = isRuntimeApplicable,
+                isUsable = isDeclared && isGranted
+            )
+        }
     }
 
     fun scanDeviceProfile(): DeviceProfile {
@@ -431,7 +453,6 @@ class DeviceCapabilityScanner(private val context: Context) {
         val declaredPermissions = pkgInfo?.requestedPermissions?.toSet() ?: emptySet()
 
         return permissionsToCheck.map { perm ->
-            val isDeclared = declaredPermissions.contains(perm)
             val isGranted = try { context.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED } catch (e: Throwable) { false }
             val isRuntime = try {
                 val info = pm?.getPermissionInfo(perm, 0)
@@ -444,13 +465,12 @@ class DeviceCapabilityScanner(private val context: Context) {
                 DANGEROUS_SYSTEM_PERMISSIONS.contains(perm)
             }
 
-            PermissionState(
+            evaluatePermissionState(
                 permission = perm,
-                isDeclared = isDeclared,
+                declaredPermissions = declaredPermissions,
                 isGranted = isGranted,
-                isRequired = true,
                 isRuntimeApplicable = isRuntime,
-                isUsable = isDeclared && isGranted
+                isRequired = true
             )
         }
     }

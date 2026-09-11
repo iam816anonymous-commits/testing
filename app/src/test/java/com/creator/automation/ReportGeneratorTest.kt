@@ -38,7 +38,9 @@ class ReportGeneratorTest {
                 expectedOutcome = "Success",
                 actualOutcome = "Success",
                 dispatchResult = "OK",
-                verificationResult = "VERIFIED_SUCCESS"
+                verificationResult = "VERIFIED_SUCCESS",
+                evidence = "Captured 1 node successfully",
+                diagnosticTrace = listOf("Trace event 1", "Trace event 2")
             )
         )
 
@@ -59,5 +61,7 @@ class ReportGeneratorTest {
         val text = reportMd.readText()
         assertTrue(text.contains("PHYSICAL DEVICE VALIDATION REPORT"))
         assertTrue(text.contains("TEST-001"))
+        assertTrue(text.contains("Evidence: Captured 1 node successfully"))
+        assertTrue(text.contains("Diagnostic Trace:"))
     }
 }

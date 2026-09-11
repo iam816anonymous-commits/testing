@@ -124,6 +124,10 @@ class ReportGenerator(private val context: Context) {
                     appendLine("Failure Reason: ${res.failureReason}")
                 }
                 appendLine("Evidence: ${res.evidence}")
+                if (res.diagnosticTrace.isNotEmpty()) {
+                    appendLine("Diagnostic Trace:")
+                    res.diagnosticTrace.forEach { line -> appendLine("  - $line") }
+                }
                 appendLine()
             }
 

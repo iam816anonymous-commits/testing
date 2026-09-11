@@ -81,4 +81,21 @@ class PhysicalTestRunnerTest {
         assertEquals(PhysicalTestStatus.ERROR, results[0].status)
         assertEquals("Simulated exception", results[0].failureReason)
     }
+
+    @Test
+    fun testSafeValidationSuitePopulatesEvidenceAndTrace() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val runner = PhysicalTestRunner(context)
+        val suite = PhysicalTestRegistry.buildSafeValidationSuite()
+
+        val results = runner.executeSuite(suite, allowUserApprovalTests = false)
+
+        assertEquals(suite.size, results.size)
+        results.forEach { result ->
+            assertNotNull("Evidence should not be null for ${result.testId}", result.evidence)
+            assertTrue("Evidence should not be empty for ${result.testId}", result.evidence.isNotEmpty())
+            assertNotNull("Diagnostic trace should not be null for ${result.testId}", result.diagnosticTrace)
+            assertTrue("Diagnostic trace should not be empty for ${result.testId}", result.diagnosticTrace.isNotEmpty())
+        }
+    }
 }

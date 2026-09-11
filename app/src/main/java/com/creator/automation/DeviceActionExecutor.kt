@@ -307,18 +307,25 @@ class DeviceActionExecutor(
     ): ActionResult {
         if (targetText.isNullOrBlank()) return ActionResult(status = ActionResultStatus.FAILED, message = "CLICK_TEXT requires target text")
 
-        // Target Freshness Enforcement: Capture fresh snapshot immediately before target resolution & dispatch
+        // Target Freshness & Stale Protection: Re-observe active window immediately prior to target resolution & dispatch
         val freshRoot = service.getRootNode()
         val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+        val freshStateSig = StateSignatureGenerator.generateSignature(freshSnapshot)
 
-        val res = actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetText)
+        var res = actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetText)
 
-        if (res.match == null) {
-            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${freshSnapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_NOT_FOUND")
-            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "TARGET_NOT_FOUND: Text '$targetText' not found in active window")
+        // If target was stale from prior signature, attempt re-resolution on fresh snapshot
+        if (res.match == null && beforeStateSig != freshStateSig) {
+            Log.w(TAG, "STALE_TARGET_DETECTED: State signature shifted ($beforeStateSig -> $freshStateSig). Re-observing and re-resolving target '${redactSensitiveText(targetText)}'")
+            res = actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetText)
         }
 
         val match = res.match
+
+        if (match == null) {
+            Log.w(TAG, "CLICK_DIAGNOSTIC: package=${freshSnapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_NOT_FOUND")
+            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "TARGET_NOT_FOUND: Text '$targetText' not found in active window")
+        }
 
         if (res.isAmbiguous) {
             val redacted = redactSensitiveText(targetText)

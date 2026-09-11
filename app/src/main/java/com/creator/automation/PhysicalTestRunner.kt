@@ -216,6 +216,7 @@ object PhysicalTestRegistry {
                         dispatchResult = "SNAPSHOT_SUCCESS",
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
                         failureReason = if (status != PhysicalTestStatus.PASS) "Accessibility service inactive or empty node tree" else null,
+                        evidence = "Captured $nodeCount accessibility nodes from active AccessibilityService",
                         diagnosticTrace = trace
                     )
                 }
@@ -268,6 +269,7 @@ object PhysicalTestRegistry {
                         dispatchResult = "RESOLVE_COMPLETE",
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
                         failureReason = if (status != PhysicalTestStatus.PASS) "Target candidate count mismatch" else null,
+                        evidence = "Resolved ${res.candidateCount} candidate nodes with isAmbiguous=${res.isAmbiguous}",
                         diagnosticTrace = trace
                     )
                 }
@@ -309,6 +311,7 @@ object PhysicalTestRegistry {
                         dispatchResult = if (isAcc) "DISPATCH_AVAILABLE" else "SERVICE_UNAVAILABLE",
                         verificationResult = if (isAcc) "VERIFIED_SUCCESS" else "BLOCKED",
                         failureReason = if (!isAcc) "Accessibility service not active on device" else null,
+                        evidence = if (isAcc) "Global Home action available via active AccessibilityService" else "AccessibilityService inactive",
                         diagnosticTrace = trace
                     )
                 }
@@ -365,6 +368,7 @@ object PhysicalTestRegistry {
                         dispatchResult = "WAIT_TIMED_OUT",
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
                         failureReason = if (status != PhysicalTestStatus.PASS) "WaitEngine did not timeout correctly" else null,
+                        evidence = "WaitEngine timeout observed after ${condition.timeoutMs}ms: ${result.failureReason}",
                         diagnosticTrace = trace
                     )
                 }
@@ -427,6 +431,7 @@ object PhysicalTestRegistry {
                         verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "VERIFICATION_FAILED",
                         failureReason = if (status != PhysicalTestStatus.PASS) "RecoveryManager boundary mismatch" else null,
                         recoveryAttempts = 1,
+                        evidence = "Evaluated recovery transitions: step0=$outcome1, step2=$outcome2, nonIdempotent=$outcome3",
                         diagnosticTrace = trace
                     )
                 }
