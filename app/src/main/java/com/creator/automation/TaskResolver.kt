@@ -186,7 +186,33 @@ class TaskResolver(
             )
         }
 
-        // 2. Extract app name query (e.g. "open chrome and search...", "launch whatsapp", "open youtube", "open settings")
+        // 2. Direct Pure Typing Task ("type hello", "enter text john")
+        if (descLower.startsWith("type ") || descLower.startsWith("enter text ")) {
+            val textToInput = taskDescription.substring(taskDescription.indexOf(" ") + 1).trim()
+            return Workflow(
+                id = "type_only_${System.currentTimeMillis()}",
+                name = "Pure Text Input Task",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(
+                            type = ActionType.TYPE_TEXT,
+                            inputData = textToInput,
+                            semantics = ActionSemantics.REPEATABLE
+                        )
+                    ),
+                    WorkflowStep(
+                        id = "step_2",
+                        action = AutomationAction(
+                            type = ActionType.READ_VISIBLE_UI,
+                            semantics = ActionSemantics.READ_ONLY
+                        )
+                    )
+                )
+            )
+        }
+
+        // 3. Extract app name query (e.g. "open chrome and search...", "launch whatsapp", "open youtube", "open settings")
         var targetAppName: String? = null
         if (descLower.startsWith("open ") || descLower.startsWith("launch ")) {
             val afterVerb = taskDescription.substring(descLower.indexOf(" ") + 1).trim()
@@ -209,6 +235,19 @@ class TaskResolver(
         val steps = mutableListOf<WorkflowStep>()
         var stepIdCounter = 1
 
+        val launchWait = if (!targetPackage.isNullOrBlank()) {
+            WaitCondition(
+                type = WaitConditionType.WAIT_FOR_PACKAGE,
+                expectedValue = targetPackage,
+                timeoutMs = 10000L
+            )
+        } else {
+            WaitCondition(
+                type = WaitConditionType.WAIT_FOR_STATE_CHANGE,
+                timeoutMs = 10000L
+            )
+        }
+
         // Step 1: LAUNCH_APP
         steps.add(
             WorkflowStep(
@@ -218,11 +257,7 @@ class TaskResolver(
                     targetValue = targetAppName,
                     timeoutMs = 10000L,
                     semantics = ActionSemantics.REPEATABLE,
-                    waitCondition = WaitCondition(
-                        type = WaitConditionType.WAIT_FOR_PACKAGE,
-                        expectedValue = targetPackage ?: "",
-                        timeoutMs = 10000L
-                    )
+                    waitCondition = launchWait
                 )
             )
         )
@@ -253,12 +288,12 @@ class TaskResolver(
                 )
             )
 
-            // Step 2b: PRESS_ENTER
+            // Step 2b: SUBMIT_INPUT
             steps.add(
                 WorkflowStep(
                     id = "step_${stepIdCounter++}",
                     action = AutomationAction(
-                        type = ActionType.PRESS_ENTER,
+                        type = ActionType.SUBMIT_INPUT,
                         timeoutMs = 5000L,
                         semantics = ActionSemantics.REPEATABLE,
                         waitCondition = WaitCondition(

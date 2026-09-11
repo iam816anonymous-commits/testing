@@ -78,7 +78,21 @@ class DeviceActionExecutor(
 
         // 3. Dispatch Action via Generic Accessibility Engine
         val dispatchResult = when (action.type) {
-            ActionType.LAUNCH_APP -> performLaunchApp(action.targetValue)
+            ActionType.LAUNCH_APP -> {
+                val launchRes = performLaunchApp(action.targetValue)
+                if (launchRes.status == ActionResultStatus.SUCCESS && action.targetValue != null) {
+                    val appRes = appResolver.resolveApplication(action.targetValue)
+                    if (appRes.packageName != null && action.waitCondition?.type == WaitConditionType.WAIT_FOR_PACKAGE) {
+                        Log.i(TAG, "LAUNCH_APP_DYNAMIC_PACKAGE_PROPAGATION: Propagating resolved package '${appRes.packageName}' to waitCondition")
+                        val updatedWait = action.waitCondition.copy(expectedValue = appRes.packageName)
+                        val waitRes = waitEngine.waitUntil(updatedWait, service, screenObservationProvider, beforeStateSig)
+                        if (!waitRes.success) {
+                            return launchRes.copy(status = ActionResultStatus.TIMEOUT, reason = ExecutionReason.TIMEOUT, message = waitRes.failureReason)
+                        }
+                    }
+                }
+                launchRes
+            }
             ActionType.OPEN_URL -> performOpenUrl(action.targetValue)
             ActionType.CHECK_AUTH_STATE -> performAuthCheck(beforeSnapshot)
             ActionType.WAIT -> performWait(action.targetValue)

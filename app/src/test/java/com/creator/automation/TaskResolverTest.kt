@@ -62,7 +62,7 @@ class TaskResolverTest {
         val wf = resolution.localWorkflow!!
         assertTrue(wf.steps.any { it.action.type == ActionType.LAUNCH_APP && it.action.targetValue == "Chrome" })
         assertTrue(wf.steps.any { it.action.type == ActionType.TYPE_TEXT && it.action.inputData == "new Telugu movies" })
-        assertTrue(wf.steps.any { it.action.type == ActionType.PRESS_ENTER })
+        assertTrue(wf.steps.any { it.action.type == ActionType.SUBMIT_INPUT || it.action.type == ActionType.PRESS_ENTER })
     }
 
     @Test

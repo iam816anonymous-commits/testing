@@ -270,11 +270,18 @@ fun AgentCommandScreen(context: Context) {
 
                     if (isDetailsExpanded) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Observation: Active UI window captured", fontSize = 10.sp)
-                        Text("Target: ${overlayState.targetText ?: "Auto-resolved target"}", fontSize = 10.sp)
-                        Text("Action: ${overlayState.actionState.name}", fontSize = 10.sp)
-                        Text("Verification: Post-action state signature comparison", fontSize = 10.sp)
-                        Text("Recovery: Bounded generic retry active", fontSize = 10.sp)
+                        Text("Task Intent: ${currentTaskGoal ?: "None"}", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Active App: ${overlayState.packageName ?: "System"}", fontSize = 10.sp)
+                        Text("Selected Target: ${overlayState.targetText ?: overlayState.targetViewId ?: "Auto-resolved node"}", fontSize = 10.sp)
+                        Text("Mechanism: ${overlayState.actionState.name}", fontSize = 10.sp)
+                        if (lastStepResult != null) {
+                            val res = lastStepResult!!
+                            Text("Dispatch Result: ${res.actionResult?.status?.name ?: "COMPLETED"}", fontSize = 10.sp)
+                            Text("Verification: ${res.verificationStatus.name}", fontSize = 10.sp)
+                            if (!res.decisionReason.isNullOrBlank()) {
+                                Text("Pipeline Reason: ${res.decisionReason}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (res.nextState == AgentState.COMPLETED) Color(0xFF2E7D32) else Color(0xFFC62828))
+                            }
+                        }
                     }
                 }
             }
