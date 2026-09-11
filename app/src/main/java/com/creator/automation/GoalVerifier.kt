@@ -85,4 +85,50 @@ class GoalVerifier(
             explanation = "Task goal criteria verified successfully on current screen"
         )
     }
+
+    /**
+     * Goal-specific verification strategy evaluator.
+     * Differentiates Observation Goals, Torch/State Goals, Navigation, Input, and Search goals.
+     */
+    fun verifyTaskGoal(
+        taskDescription: String,
+        snapshot: UiSnapshot?,
+        lastActionResult: ActionResult? = null
+    ): GoalVerificationResult {
+        val taskLower = taskDescription.trim().lowercase()
+
+        // 1. Observation Goals ("read screen", "read visible ui", "what is on the screen")
+        if (taskLower.contains("read") && (taskLower.contains("screen") || taskLower.contains("ui"))) {
+            if (snapshot == null || snapshot.totalNodeCount == 0) {
+                return GoalVerificationResult(
+                    status = GoalVerificationStatus.NO_SNAPSHOT,
+                    isVerified = false,
+                    explanation = "Observation failed: Active screen snapshot is empty or unobservable"
+                )
+            }
+            val texts = if (snapshot.visibleTexts.isNotEmpty()) snapshot.visibleTexts.distinct().take(15) else snapshot.contentDescriptions.distinct().take(15)
+            val textContent = if (texts.isNotEmpty()) texts.joinToString("\n• ") else "No text elements detected"
+            val focusedElement = snapshot.focusedNodes.firstOrNull()?.text ?: "None"
+            val formattedScreenData = "App: ${snapshot.packageName}\nFocused: $focusedElement\nVisible Content:\n• $textContent"
+
+            return GoalVerificationResult(
+                status = GoalVerificationStatus.GOAL_VERIFIED,
+                isVerified = true,
+                explanation = formattedScreenData
+            )
+        }
+
+        // 2. Flashlight / Torch State Goals ("flashlight", "torch")
+        if (taskLower.contains("flashlight") || taskLower.contains("torch")) {
+            Log.w(TAG, "TORCH_VERIFICATION_UNAVAILABLE: Flashlight command executed, but API 27 device hardware does not expose observable torch state.")
+            return GoalVerificationResult(
+                status = GoalVerificationStatus.UNKNOWN,
+                isVerified = false,
+                explanation = "VERIFICATION_UNAVAILABLE: Flashlight command dispatched, but torch hardware state verification is unobservable on this device."
+            )
+        }
+
+        // 3. Fallback to generic goal criteria check
+        return verifyGoal(expectedGoalText = null, expectedPackage = null, snapshot = snapshot)
+    }
 }

@@ -291,17 +291,27 @@ fun AgentCommandScreen(context: Context) {
             // Result Cards
             if (lastStepResult != null) {
                 val stepRes = lastStepResult!!
-                if (stepRes.nextState == AgentState.COMPLETED) {
+                if (stepRes.goalResult == GoalResult.CONFIRMED && stepRes.nextState == AgentState.COMPLETED) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("✓ TASK COMPLETED", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2E7D32))
-                            Text(stepRes.decisionReason ?: "Task completed successfully.", fontSize = 11.sp)
+                            Text("✓ GOAL CONFIRMED", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF2E7D32))
+                            Text(stepRes.decisionReason ?: "Task criteria verified on current screen.", fontSize = 11.sp)
                         }
                     }
-                } else if (stepRes.nextState == AgentState.PAUSED || stepRes.nextState == AgentState.FAILED) {
+                } else if (stepRes.goalResult == GoalResult.VERIFICATION_UNAVAILABLE) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("⚠ VERIFICATION UNAVAILABLE", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFE65100))
+                            Text(stepRes.decisionReason ?: "Action dispatched, but hardware state verification is unavailable.", fontSize = 11.sp)
+                        }
+                    }
+                } else {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))

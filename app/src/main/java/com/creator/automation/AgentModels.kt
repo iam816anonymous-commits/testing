@@ -23,8 +23,18 @@ data class AgentStepResult(
     val actionExecuted: AutomationAction?,
     val actionResult: ActionResult?,
     val verificationStatus: VerificationStatus,
+    val goalResult: GoalResult = GoalResult.NOT_CONFIRMED,
     val nextState: AgentState
 )
+
+enum class GoalResult {
+    CONFIRMED,
+    NOT_CONFIRMED,
+    VERIFICATION_UNAVAILABLE,
+    FAILED,
+    NEEDS_USER_INPUT,
+    AMBIGUOUS
+}
 
 enum class RecoveryOutcome {
     RETRY,
