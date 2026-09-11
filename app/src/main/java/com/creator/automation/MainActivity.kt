@@ -86,7 +86,7 @@ fun MainAgentApp(context: Context) {
 
         when (selectedMainTab) {
             0 -> AgentCommandScreen(context = context)
-            1 -> UserTaskHistoryScreen(context = context)
+            1 -> UserTaskHistoryScreen()
             2 -> UserCapabilitiesScreen(context = context)
             3 -> DiagnosticControlCenter(context = context)
         }
@@ -97,8 +97,6 @@ fun MainAgentApp(context: Context) {
 fun AgentCommandScreen(context: Context) {
     val coroutineScope = rememberCoroutineScope()
 
-    val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
-    val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val agentState by AgentCore.agentState.collectAsState()
     val overlayState by AutomationOverlayState.currentState.collectAsState()
 
@@ -107,8 +105,6 @@ fun AgentCommandScreen(context: Context) {
     var lastStepResult by remember { mutableStateOf<AgentStepResult?>(null) }
     var isExecuting by remember { mutableStateOf(false) }
     var isDetailsExpanded by remember { mutableStateOf(false) }
-
-    val agentCore = remember { AgentCore(context) }
     val scrollState = rememberScrollState()
 
     val suggestions = listOf(
@@ -178,7 +174,8 @@ fun AgentCommandScreen(context: Context) {
                         currentTaskGoal = task
                         isExecuting = true
                         coroutineScope.launch {
-                            val res = agentCore.executeTaskStep(task)
+                            val runtimeManager = AgentRuntimeManager(context)
+                            val res = runtimeManager.startOrResumeTaskSession(task)
                             lastStepResult = res
                             isExecuting = false
                         }
@@ -303,8 +300,8 @@ fun AgentCommandScreen(context: Context) {
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("✕ COULDN'T COMPLETE TASK", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFC62828))
-                            Text(stepRes.decisionReason ?: "Unable to verify task completion.", fontSize = 11.sp)
+                            Text("✕ COULDN'T COMPLETE TASK (${stepRes.nextState.name})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFC62828))
+                            Text(stepRes.decisionReason ?: stepRes.actionResult?.reason?.name ?: "Unable to verify task completion.", fontSize = 11.sp)
                         }
                     }
                 }
@@ -314,7 +311,7 @@ fun AgentCommandScreen(context: Context) {
 }
 
 @Composable
-fun UserTaskHistoryScreen(context: Context) {
+fun UserTaskHistoryScreen() {
     val logs by AgentRuntimeManager.runtimeLogs.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {

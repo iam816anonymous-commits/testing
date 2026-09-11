@@ -40,30 +40,9 @@ class AgentCore(
         trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
         globalAutonomousEnabled: Boolean = true
     ): AgentStepResult {
-        if (_agentState.value == AgentState.CANCELLED) {
-            logAgentActivity("AGENT_CANCELLED: Execution aborted by user cancellation")
-            return AgentStepResult(
-                stateBefore = AgentState.CANCELLED,
-                observation = null,
-                decisionReason = "Agent task cancelled",
-                actionExecuted = null,
-                actionResult = null,
-                verificationStatus = VerificationStatus.FAILED,
-                nextState = AgentState.CANCELLED
-            )
-        }
-
-        if (_agentState.value == AgentState.PAUSED) {
-            logAgentActivity("AGENT_PAUSED: Execution halted due to pause state")
-            return AgentStepResult(
-                stateBefore = AgentState.PAUSED,
-                observation = null,
-                decisionReason = "Agent loop is currently PAUSED",
-                actionExecuted = null,
-                actionResult = null,
-                verificationStatus = VerificationStatus.FAILED,
-                nextState = AgentState.PAUSED
-            )
+        if (_agentState.value == AgentState.CANCELLED || _agentState.value == AgentState.PAUSED) {
+            logAgentActivity("AGENT_RESUMING: Resuming agent loop from ${_agentState.value.name} for task '$taskDescription'")
+            _agentState.value = AgentState.IDLE
         }
 
         // 1. OBSERVING (Observe before action - Multi-Source Hierarchy: Accessibility -> Screen -> Camera)
