@@ -35,29 +35,42 @@ class DeviceCapabilityScannerTest {
     @Test
     fun testPermissionScanDistinguishesDeclaredAndGranted() {
         val app = ApplicationProvider.getApplicationContext<Application>()
-        // Revoke dangerous runtime permission CAMERA in Robolectric test environment
         shadowOf(app).denyPermissions(android.Manifest.permission.CAMERA)
 
         val scanner = DeviceCapabilityScanner(app)
-
         val permissions = scanner.scanPermissions()
 
-        assertFalse(permissions.isEmpty())
+        println("=== PERMISSION DIAGNOSTIC LOG START ===")
+        permissions.forEach { p ->
+            println("perm=${p.permission.substringAfterLast('.')} | declared=${p.isDeclared} | granted=${p.isGranted} | required=${p.isRequired} | runtime=${p.isRuntimeApplicable} | usable=${p.isUsable}")
+        }
+        println("=== PERMISSION DIAGNOSTIC LOG END ===")
 
         val internetPerm = permissions.find { it.permission == android.Manifest.permission.INTERNET }
         val cameraPerm = permissions.find { it.permission == android.Manifest.permission.CAMERA }
+        val locationPerm = permissions.find { it.permission == android.Manifest.permission.ACCESS_FINE_LOCATION }
 
-        val diag = "INTERNET: $internetPerm | CAMERA: $cameraPerm"
+        val diagMsg = "INTERNET: $internetPerm\nCAMERA: $cameraPerm\nLOCATION: $locationPerm"
 
-        assertNotNull("Internet perm missing. $diag", internetPerm)
-        assertTrue("Internet isDeclared false. $diag", internetPerm!!.isDeclared)
-        assertTrue("Internet isGranted false. $diag", internetPerm.isGranted)
-        assertTrue("Internet isUsable false. $diag", internetPerm.isUsable)
+        // Assert 1: Internet (Normal level, declared in manifest) -> DECLARED = true, GRANTED = true, USABLE = true
+        assertNotNull("Internet permission missing from scan", internetPerm)
+        assertEquals("Internet declared mismatch. $diagMsg", true, internetPerm!!.isDeclared)
+        assertEquals("Internet granted mismatch. $diagMsg", true, internetPerm.isGranted)
+        assertEquals("Internet usable mismatch. $diagMsg", true, internetPerm.isUsable)
+        assertEquals("Internet runtimeApplicable mismatch. $diagMsg", false, internetPerm.isRuntimeApplicable)
 
-        assertNotNull("Camera perm missing. $diag", cameraPerm)
-        assertTrue("Camera isDeclared false. $diag", cameraPerm!!.isDeclared)
-        assertFalse("Camera isGranted true. $diag", cameraPerm.isGranted)
-        assertFalse("Camera isUsable true. $diag", cameraPerm.isUsable)
+        // Assert 2: Camera (Dangerous level, declared in manifest, denied at runtime) -> DECLARED = true, GRANTED = false, USABLE = false
+        assertNotNull("Camera permission missing from scan", cameraPerm)
+        assertEquals("Camera declared mismatch. $diagMsg", true, cameraPerm!!.isDeclared)
+        assertEquals("Camera granted mismatch. $diagMsg", false, cameraPerm.isGranted)
+        assertEquals("Camera usable mismatch. $diagMsg", false, cameraPerm.isUsable)
+        assertEquals("Camera runtimeApplicable mismatch. $diagMsg", true, cameraPerm.isRuntimeApplicable)
+
+        // Assert 3: Location (Dangerous level, NOT declared in manifest) -> DECLARED = false, GRANTED = false, USABLE = false
+        assertNotNull("Location permission missing from scan", locationPerm)
+        assertEquals("Location declared mismatch. $diagMsg", false, locationPerm!!.isDeclared)
+        assertEquals("Location granted mismatch. $diagMsg", false, locationPerm.isGranted)
+        assertEquals("Location usable mismatch. $diagMsg", false, locationPerm.isUsable)
     }
 
     @Test
