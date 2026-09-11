@@ -180,6 +180,17 @@ data class DeviceProfile(
 
 class DeviceCapabilityScanner(private val context: Context) {
 
+    companion object {
+        private val DANGEROUS_SYSTEM_PERMISSIONS = setOf(
+            android.Manifest.permission.CAMERA,
+            android.Manifest.permission.RECORD_AUDIO,
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        )
+    }
+
     fun scanDeviceProfile(): DeviceProfile {
         val sensors = scanSensors()
         val actuators = scanActuators()
@@ -424,9 +435,13 @@ class DeviceCapabilityScanner(private val context: Context) {
             val isGranted = try { context.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED } catch (e: Throwable) { false }
             val isRuntime = try {
                 val info = pm?.getPermissionInfo(perm, 0)
-                if (info != null) (info.protectionLevel and android.content.pm.PermissionInfo.PROTECTION_DANGEROUS) != 0 else false
+                if (info != null) {
+                    (info.protectionLevel and android.content.pm.PermissionInfo.PROTECTION_DANGEROUS) != 0
+                } else {
+                    DANGEROUS_SYSTEM_PERMISSIONS.contains(perm)
+                }
             } catch (e: Throwable) {
-                false
+                DANGEROUS_SYSTEM_PERMISSIONS.contains(perm)
             }
 
             PermissionState(
