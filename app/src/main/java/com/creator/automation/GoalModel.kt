@@ -17,6 +17,11 @@ data class GoalModel(
     val expectedTextInResult: String? = null,
     val requestedActionType: ActionType? = null,
     val requestedActionTarget: String? = null,
+    val constraints: List<String> = emptyList(),
+    val requiredCapabilities: List<String> = emptyList(),
+    val requiredPermissions: List<String> = emptyList(),
+    val sideEffectRisk: ActionSemantics = ActionSemantics.REPEATABLE,
+    val subgoals: List<String> = emptyList(),
     val maxActionBudget: Int = 10,
     val currentActionCount: Int = 0,
     val status: GoalStatus = GoalStatus.PARSED,
@@ -31,6 +36,24 @@ data class GoalModel(
             val trimmed = rawGoal.trim()
             val lower = trimmed.lowercase()
 
+            // Extract constraints from raw intent
+            val constraintList = mutableListOf<String>()
+            if (lower.contains("don't send") || lower.contains("without sending")) constraintList.add("NO_SEND_MESSAGE")
+            if (lower.contains("don't delete") || lower.contains("without deleting")) constraintList.add("NO_DELETE_DATA")
+            if (lower.contains("don't purchase") || lower.contains("without buying")) constraintList.add("NO_PURCHASE")
+            if (lower.contains("read only") || lower.contains("only read")) constraintList.add("READ_ONLY")
+
+            // Extract required capabilities/permissions
+            val caps = mutableListOf<String>()
+            val perms = mutableListOf<String>()
+            if (lower.contains("camera") || lower.contains("picture") || lower.contains("photo")) {
+                caps.add("CAMERA_VISION")
+                perms.add(android.Manifest.permission.CAMERA)
+            }
+            if (lower.contains("record") || lower.contains("audio") || lower.contains("microphone")) {
+                perms.add(android.Manifest.permission.RECORD_AUDIO)
+            }
+
             // 1. URL Navigation Intent: "go to google.com", "open https://example.com"
             if (lower.startsWith("go to ") || lower.contains("http://") || lower.contains("https://")) {
                 val urlCandidate = if (lower.startsWith("go to ")) trimmed.substringAfterIgnoreCase("go to ").trim() else trimmed
@@ -38,7 +61,11 @@ data class GoalModel(
                     rawUserIntent = trimmed,
                     normalizedObjective = trimmed,
                     requestedActionType = ActionType.OPEN_URL,
-                    requestedActionTarget = urlCandidate
+                    requestedActionTarget = urlCandidate,
+                    constraints = constraintList,
+                    requiredCapabilities = caps,
+                    requiredPermissions = perms,
+                    sideEffectRisk = if (constraintList.isNotEmpty() || perms.isNotEmpty()) ActionSemantics.HIGH_RISK else ActionSemantics.REPEATABLE
                 )
             }
 
@@ -64,7 +91,11 @@ data class GoalModel(
                     targetAppQuery = appPart,
                     expectedTextInResult = searchPart,
                     requestedActionType = null,
-                    requestedActionTarget = null
+                    requestedActionTarget = null,
+                    constraints = constraintList,
+                    requiredCapabilities = caps,
+                    requiredPermissions = perms,
+                    sideEffectRisk = if (constraintList.isNotEmpty() || perms.isNotEmpty()) ActionSemantics.HIGH_RISK else ActionSemantics.REPEATABLE
                 )
             }
 
@@ -147,7 +178,11 @@ data class GoalModel(
                 targetAppQuery = targetApp,
                 expectedTextInResult = expectedText,
                 requestedActionType = requestedType,
-                requestedActionTarget = requestedTarget
+                requestedActionTarget = requestedTarget,
+                constraints = constraintList,
+                requiredCapabilities = caps,
+                requiredPermissions = perms,
+                sideEffectRisk = if (constraintList.isNotEmpty() || perms.isNotEmpty()) ActionSemantics.HIGH_RISK else ActionSemantics.REPEATABLE
             )
         }
     }
