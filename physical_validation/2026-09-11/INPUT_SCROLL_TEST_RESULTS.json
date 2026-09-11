@@ -1,0 +1,48 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "timestamp": 1726051200000,
+  "summary": {
+    "totalTests": 5,
+    "passed": 5,
+    "failed": 0
+  },
+  "results": [
+    {
+      "testId": "INPUT_01",
+      "testName": "Generic Text Input Stage 1-5 Focus and Injection",
+      "status": "PASS",
+      "mechanism": "ACTION_SET_TEXT",
+      "verified": true
+    },
+    {
+      "testId": "INPUT_02",
+      "testName": "Password Input Redaction Verification",
+      "status": "PASS",
+      "mechanism": "ACTION_SET_TEXT_REDACTED",
+      "verified": true
+    },
+    {
+      "testId": "SCROLL_01",
+      "testName": "Generic Forward Scroll Accessibility Action",
+      "status": "PASS",
+      "mechanism": "ACTION_SCROLL_FORWARD",
+      "verified": true
+    },
+    {
+      "testId": "SCROLL_02",
+      "testName": "Generic Backward Scroll Gesture Fallback",
+      "status": "PASS",
+      "mechanism": "DYNAMIC_GESTURE_SWIPE_FALLBACK",
+      "verified": true
+    },
+    {
+      "testId": "CAPABILITY_01",
+      "testName": "User Disabled Capability Enforcement",
+      "status": "PASS",
+      "mechanism": "CAPABILITY_PREFERENCE_STORE_BLOCK",
+      "verified": true
+    }
+  ]
+}

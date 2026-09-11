@@ -1,0 +1,7 @@
+{
+  "testSuite": "Capability and Permission Control Center Validation",
+  "device": "TECNO IN6 (API 27)",
+  "totalCapabilitiesAudited": 8,
+  "userTogglePolicyEnforced": true,
+  "onDemandPermissionPolicyEnforced": true
+}

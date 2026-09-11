@@ -57,6 +57,32 @@ object AndroidAutomationCompat {
     }
 
     /**
+     * Dispatches a dynamic gesture swipe from (startX, startY) to (endX, endY). Supported on API 24+.
+     */
+    fun dispatchSwipe(
+        service: AutomationAccessibilityService?,
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+        durationMs: Long = 300L
+    ): Boolean {
+        if (service == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
+        return try {
+            val path = android.graphics.Path().apply {
+                moveTo(startX, startY)
+                lineTo(endX, endY)
+            }
+            val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, durationMs)
+            val gesture = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+            service.dispatchGesture(gesture, null, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error dispatching gesture swipe ($startX, $startY) -> ($endX, $endY)", e)
+            false
+        }
+    }
+
+    /**
      * API-27-compatible screenshot / screen perception capture.
      * On API 30+, uses AccessibilityService native takeScreenshot.
      * On API < 30 (API 27), falls back to MediaProjection visual capture or UI snapshot.

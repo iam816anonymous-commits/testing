@@ -335,19 +335,50 @@ fun UserTaskHistoryScreen() {
 @Composable
 fun UserCapabilitiesScreen(context: Context) {
     val scanner = remember { DeviceCapabilityScanner(context) }
-    val profile = remember { scanner.scanDeviceProfile() }
+    var profile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("DEVICE CAPABILITIES", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+        Text("CAPABILITIES & PERMISSIONS CONTROL CENTER", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
         Text("${profile.manufacturer} ${profile.model} (API ${profile.apiLevel})", fontSize = 11.sp, color = Color.Gray)
+        Text("User-controlled agent capability policy. Toggling OFF prevents the agent from utilizing the capability.", fontSize = 10.sp, color = Color.DarkGray)
         Spacer(modifier = Modifier.height(12.dp))
 
         profile.capabilityMappings.forEach { cap ->
-            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text(cap.name, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = if (cap.isUsable) Color(0xFFF1F8E9) else Color(0xFFFFF3E0))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(cap.name, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Switch(
+                            checked = cap.isUserEnabled,
+                            onCheckedChange = { isChecked ->
+                                CapabilityPreferenceStore.setUserEnabled(context, cap.name, isChecked)
+                                profile = scanner.scanDeviceProfile()
+                            }
+                        )
+                    }
                     Text("Hardware: ${cap.hardwareState} | Permission: ${cap.permissionState}", fontSize = 10.sp)
-                    Text("Operation: ${cap.operationState} | Verification: ${cap.verificationState}", fontSize = 10.sp)
+                    Text("Service/Operation: ${cap.operationState} | Verification: ${cap.verificationState}", fontSize = 10.sp)
+
+                    val usableText = when {
+                        !cap.isUserEnabled -> "USER_DISABLED (Agent blocked from using this capability)"
+                        cap.isUsable -> "USABLE (Active & Allowed)"
+                        cap.permissionState == PhysicalCapabilityState.BLOCKED -> "PERMISSION_REQUIRED (Grant permission to activate)"
+                        else -> "SERVICE_UNAVAILABLE"
+                    }
+                    val usableColor = when {
+                        !cap.isUserEnabled -> Color(0xFFE65100)
+                        cap.isUsable -> Color(0xFF2E7D32)
+                        else -> Color(0xFFC62828)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Status: $usableText", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = usableColor)
                 }
             }
         }
