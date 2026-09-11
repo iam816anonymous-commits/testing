@@ -33,8 +33,74 @@ class DeviceCapabilityScannerTest {
     }
 
     @Test
+    fun testEvaluatePermissionStateMandatoryRegressionCases() {
+        val declaredSet = setOf(
+            android.Manifest.permission.CAMERA,
+            android.Manifest.permission.INTERNET
+        )
+
+        // Case 1: Declared but NOT granted
+        val declaredNotGranted = DeviceCapabilityScanner.evaluatePermissionState(
+            permission = android.Manifest.permission.CAMERA,
+            declaredPermissions = declaredSet,
+            isGranted = false,
+            isRuntimeApplicable = true,
+            isRequired = true
+        )
+        assertEquals(android.Manifest.permission.CAMERA, declaredNotGranted.permission)
+        assertTrue("Declared mismatch for Case 1", declaredNotGranted.isDeclared)
+        assertFalse("Granted mismatch for Case 1", declaredNotGranted.isGranted)
+        assertTrue("Required mismatch for Case 1", declaredNotGranted.isRequired)
+        assertTrue("RuntimeApplicable mismatch for Case 1", declaredNotGranted.isRuntimeApplicable)
+        assertFalse("Usable mismatch for Case 1 (must be false when not granted)", declaredNotGranted.isUsable)
+
+        // Case 2: Declared and granted
+        val declaredAndGranted = DeviceCapabilityScanner.evaluatePermissionState(
+            permission = android.Manifest.permission.INTERNET,
+            declaredPermissions = declaredSet,
+            isGranted = true,
+            isRuntimeApplicable = false,
+            isRequired = true
+        )
+        assertEquals(android.Manifest.permission.INTERNET, declaredAndGranted.permission)
+        assertTrue("Declared mismatch for Case 2", declaredAndGranted.isDeclared)
+        assertTrue("Granted mismatch for Case 2", declaredAndGranted.isGranted)
+        assertTrue("Required mismatch for Case 2", declaredAndGranted.isRequired)
+        assertFalse("RuntimeApplicable mismatch for Case 2", declaredAndGranted.isRuntimeApplicable)
+        assertTrue("Usable mismatch for Case 2 (must be true when declared and granted)", declaredAndGranted.isUsable)
+
+        // Case 3: Not declared
+        val notDeclared = DeviceCapabilityScanner.evaluatePermissionState(
+            permission = android.Manifest.permission.ACCESS_FINE_LOCATION,
+            declaredPermissions = declaredSet,
+            isGranted = false,
+            isRuntimeApplicable = true,
+            isRequired = true
+        )
+        assertEquals(android.Manifest.permission.ACCESS_FINE_LOCATION, notDeclared.permission)
+        assertFalse("Declared mismatch for Case 3", notDeclared.isDeclared)
+        assertFalse("Granted mismatch for Case 3", notDeclared.isGranted)
+        assertTrue("Required mismatch for Case 3", notDeclared.isRequired)
+        assertTrue("RuntimeApplicable mismatch for Case 3", notDeclared.isRuntimeApplicable)
+        assertFalse("Usable mismatch for Case 3 (must be false when not declared)", notDeclared.isUsable)
+    }
+
+    @Test
     fun testPermissionScanDistinguishesDeclaredAndGranted() {
         val app = ApplicationProvider.getApplicationContext<Application>()
+        val pm = app.packageManager
+
+        val packageInfo = pm.getPackageInfo(app.packageName, 0).apply {
+            requestedPermissions = arrayOf(
+                android.Manifest.permission.INTERNET,
+                android.Manifest.permission.CAMERA,
+                android.Manifest.permission.RECORD_AUDIO,
+                android.Manifest.permission.VIBRATE,
+                android.Manifest.permission.WAKE_LOCK
+            )
+        }
+        shadowOf(pm).installPackage(packageInfo)
+        shadowOf(app).grantPermissions(android.Manifest.permission.INTERNET)
         shadowOf(app).denyPermissions(android.Manifest.permission.CAMERA)
 
         val scanner = DeviceCapabilityScanner(app)
