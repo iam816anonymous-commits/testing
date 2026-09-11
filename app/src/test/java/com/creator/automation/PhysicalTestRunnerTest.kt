@@ -90,7 +90,7 @@ class PhysicalTestRunnerTest {
 
         val results = runner.executeSuite(suite, allowUserApprovalTests = false)
 
-        assertEquals(6, results.size)
+        assertEquals(suite.size, results.size)
         results.forEach { result ->
             assertNotNull("Evidence should not be null for ${result.testId}", result.evidence)
             assertTrue("Evidence should not be empty for ${result.testId}", result.evidence.isNotEmpty())
