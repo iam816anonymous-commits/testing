@@ -35,7 +35,7 @@ class DeviceCapabilityScannerTest {
     @Test
     fun testPermissionScanDistinguishesDeclaredAndGranted() {
         val app = ApplicationProvider.getApplicationContext<Application>()
-        // Model real Android runtime permission state: CAMERA is declared in manifest but ungranted until runtime request
+        // Revoke dangerous runtime permission CAMERA in Robolectric test environment
         shadowOf(app).denyPermissions(android.Manifest.permission.CAMERA)
 
         val scanner = DeviceCapabilityScanner(app)
@@ -44,19 +44,20 @@ class DeviceCapabilityScannerTest {
 
         assertFalse(permissions.isEmpty())
 
-        // 1. Internet permission (normal level): declared AND granted
         val internetPerm = permissions.find { it.permission == android.Manifest.permission.INTERNET }
-        assertNotNull(internetPerm)
-        assertTrue(internetPerm!!.isDeclared)
-        assertTrue(internetPerm.isGranted)
-        assertTrue(internetPerm.isUsable)
-
-        // 2. Camera permission (dangerous level): declared BUT NOT granted
         val cameraPerm = permissions.find { it.permission == android.Manifest.permission.CAMERA }
-        assertNotNull(cameraPerm)
-        assertTrue(cameraPerm!!.isDeclared)
-        assertFalse(cameraPerm.isGranted)
-        assertFalse(cameraPerm.isUsable)
+
+        val diag = "INTERNET: $internetPerm | CAMERA: $cameraPerm"
+
+        assertNotNull("Internet perm missing. $diag", internetPerm)
+        assertTrue("Internet isDeclared false. $diag", internetPerm!!.isDeclared)
+        assertTrue("Internet isGranted false. $diag", internetPerm.isGranted)
+        assertTrue("Internet isUsable false. $diag", internetPerm.isUsable)
+
+        assertNotNull("Camera perm missing. $diag", cameraPerm)
+        assertTrue("Camera isDeclared false. $diag", cameraPerm!!.isDeclared)
+        assertFalse("Camera isGranted true. $diag", cameraPerm.isGranted)
+        assertFalse("Camera isUsable true. $diag", cameraPerm.isUsable)
     }
 
     @Test
