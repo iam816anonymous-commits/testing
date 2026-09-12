@@ -14,9 +14,10 @@ import androidx.room.RoomDatabase
         LearnedWorkflow::class,
         LearnedWorkflowStep::class,
         TaskRecord::class,
-        AgentSessionRecord::class
+        AgentSessionRecord::class,
+        DiscoveredTransitionRecord::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,6 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun learnedWorkflowDao(): LearnedWorkflowDao
     abstract fun taskDao(): TaskDao
     abstract fun agentSessionDao(): AgentSessionDao
+    abstract fun discoveredTransitionDao(): DiscoveredTransitionDao
 
     companion object {
         @Volatile

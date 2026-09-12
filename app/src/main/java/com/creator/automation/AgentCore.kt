@@ -27,6 +27,12 @@ class AgentCore(
         private val _recentAgentLogs = MutableStateFlow<List<String>>(emptyList())
         val recentAgentLogs: StateFlow<List<String>> = _recentAgentLogs.asStateFlow()
 
+        private val _lastDiscoveredSurfaces = MutableStateFlow<List<InteractionSurface>>(emptyList())
+        val lastDiscoveredSurfaces: StateFlow<List<InteractionSurface>> = _lastDiscoveredSurfaces.asStateFlow()
+
+        private val _lastDiscoveredCandidates = MutableStateFlow<List<InteractionCandidate>>(emptyList())
+        val lastDiscoveredCandidates: StateFlow<List<InteractionCandidate>> = _lastDiscoveredCandidates.asStateFlow()
+
         private fun logAgentActivity(message: String) {
             Log.i(TAG, message)
             val current = _recentAgentLogs.value.toMutableList()
@@ -126,12 +132,19 @@ class AgentCore(
             }
         }
 
-        // Build ApplicationWorldState & ActionGraph from active snapshot
+        // Build ApplicationWorldState, ActionGraph & Generic App Interaction Discovery
         val snap = primaryObservation.snapshot
         if (snap != null) {
             val appWorldState = ApplicationWorldState.fromSnapshot(snap)
             val actionGraph = ActionGraph.buildFromWorldState(appWorldState)
-            logAgentActivity("WORLD_STATE_BUILT: Pkg=${appWorldState.packageName}, Interactive=${appWorldState.interactiveNodes.size}, ActionGraphTransitions=${actionGraph.availableTransitions.size}")
+
+            val surfaces = InteractionDiscoveryEngine.discoverSurfaces(snap)
+            val candidates = InteractionDiscoveryEngine.generateCandidates(surfaces)
+
+            _lastDiscoveredSurfaces.value = surfaces
+            _lastDiscoveredCandidates.value = candidates
+
+            logAgentActivity("WORLD_STATE_BUILT: Pkg=${appWorldState.packageName}, Interactive=${appWorldState.interactiveNodes.size}, ActionGraphTransitions=${actionGraph.availableTransitions.size}, DiscoveredSurfaces=${surfaces.size}, SafeCandidates=${candidates.count { it.safetyLevel == InteractionSafetyLevel.SAFE_TO_EXPLORE }}")
         }
 
         if (_agentState.value == AgentState.CANCELLED) {
@@ -190,6 +203,44 @@ class AgentCore(
             VerificationStatus.SUCCESSFULLY_VERIFIED
         } else {
             VerificationStatus.FAILED
+        }
+
+        // Record Transition Observation
+        try {
+            val db = AppDatabase.getDatabase(context)
+            val transitionEngine = TransitionObservationEngine(db.discoveredTransitionDao())
+
+            val resolvedActionType = when {
+                taskDescription.contains("home", ignoreCase = true) -> ActionType.PRESS_HOME
+                taskDescription.contains("back", ignoreCase = true) -> ActionType.GO_BACK
+                taskDescription.contains("recents", ignoreCase = true) -> ActionType.PRESS_RECENTS
+                taskDescription.contains("scroll", ignoreCase = true) -> ActionType.SCROLL_DOWN
+                taskDescription.contains("type", ignoreCase = true) -> ActionType.TYPE_TEXT
+                taskDescription.contains("flash", ignoreCase = true) || taskDescription.contains("vibrate", ignoreCase = true) || taskDescription.contains("mute", ignoreCase = true) -> ActionType.TOGGLE_HARDWARE
+                taskDescription.contains("search", ignoreCase = true) || taskDescription.contains("submit", ignoreCase = true) -> ActionType.SUBMIT_INPUT
+                else -> ActionType.CLICK_TEXT
+            }
+
+            val targetSurfaceId = result.matchedNode?.viewIdResourceName
+                ?: result.matchedNode?.text
+                ?: result.matchedNode?.contentDescription
+                ?: taskDescription
+
+            val transitionRes = transitionEngine.observeTransition(
+                packageName = primaryObservation.packageName,
+                preSnapshot = snap,
+                postSnapshot = postObs.snapshot,
+                actionType = resolvedActionType,
+                targetSurfaceId = targetSurfaceId,
+                verificationResult = hwVerifyRes ?: GoalVerificationResult(
+                    status = if (verificationStatus == VerificationStatus.SUCCESSFULLY_VERIFIED) GoalVerificationStatus.GOAL_VERIFIED else GoalVerificationStatus.GOAL_NOT_REACHED,
+                    isVerified = verificationStatus == VerificationStatus.SUCCESSFULLY_VERIFIED,
+                    explanation = result.message ?: "Step execution result"
+                )
+            )
+            logAgentActivity("TRANSITION_OBSERVED: Action=$resolvedActionType, Surface='$targetSurfaceId', Changed=${transitionRes.isStateChanged}, Conf=${transitionRes.confidence}")
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error recording transition observation: ${e.message}", e)
         }
 
         logAgentActivity("AGENT_VERIFYING: Post-action state = ${postObs.stateSignature}$visualVerificationDetails, Verification = $verificationStatus")

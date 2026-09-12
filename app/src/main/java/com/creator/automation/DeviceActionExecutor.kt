@@ -2,6 +2,7 @@ package com.creator.automation
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
@@ -330,9 +331,27 @@ class DeviceActionExecutor(
 
         if (match == null) {
             if (screenObservationProvider != null && ScreenObservationProvider.isAuthorized.value) {
-                Log.i(TAG, "ACCESSIBILITY_NOT_FOUND: Capturing visual frame observation for '$targetText'")
-                val obs = screenObservationProvider.captureObservation()
-                Log.i(TAG, "VISUAL_PERCEPTION_OBSERVED: Frame ${obs.width}x${obs.height}, confidence=${obs.confidence}, changeState=${obs.visualChangeState}")
+                Log.i(TAG, "ACCESSIBILITY_NOT_FOUND: Attempting fused visual perception resolution for '$targetText'")
+                val obs = PerceptionFusionEngine.fuse(
+                    snapshot = freshSnapshot,
+                    packageName = freshSnapshot.packageName
+                )
+                val fusedRes = actionResolver.resolveFusedTarget(obs, targetText)
+                if (fusedRes.match != null && fusedRes.match.node.boundsInScreen != null) {
+                    val boundsRect = parseBoundsRect(fusedRes.match.node.boundsInScreen)
+                    if (boundsRect != null && boundsRect.width() > 0 && boundsRect.height() > 0) {
+                        Log.i(TAG, "FUSED_TARGET_RESOLVED: Resolved visual target '$targetText' at bounds $boundsRect. Dispatching gesture tap.")
+                        val gestureSuccess = service.dispatchGestureTap(boundsRect.centerX().toFloat(), boundsRect.centerY().toFloat())
+                        if (gestureSuccess) {
+                            return ActionResult(
+                                status = ActionResultStatus.SUCCESS,
+                                matchedNode = fusedRes.match.node,
+                                matchMethod = fusedRes.match.matchMethod,
+                                message = "VERIFIED_SUCCESS: Fused visual target clicked at bounds [${boundsRect.left}, ${boundsRect.top}, ${boundsRect.right}, ${boundsRect.bottom}]"
+                            )
+                        }
+                    }
+                }
             }
 
             Log.w(TAG, "CLICK_DIAGNOSTIC: package=${freshSnapshot.packageName}, target=${redactSensitiveText(targetText)}, result=TARGET_NOT_FOUND")
@@ -362,7 +381,7 @@ class DeviceActionExecutor(
             targetNode = targetNode.parent
         }
 
-        val boundsRect = android.graphics.Rect()
+        val boundsRect = Rect()
         nodeRef.getBoundsInScreen(boundsRect)
         val targetBounds = TargetBounds(boundsRect.left, boundsRect.top, boundsRect.right, boundsRect.bottom)
 
@@ -493,7 +512,7 @@ class DeviceActionExecutor(
         val editableNode = res.match.node.nodeRef as? AccessibilityNodeInfo
             ?: return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Editable node reference missing")
 
-        val boundsRect = android.graphics.Rect()
+        val boundsRect = Rect()
         editableNode.getBoundsInScreen(boundsRect)
         val targetBounds = TargetBounds(boundsRect.left, boundsRect.top, boundsRect.right, boundsRect.bottom)
 
@@ -665,7 +684,7 @@ class DeviceActionExecutor(
                 var clicked = targetNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
                 if (!clicked) {
                     // Gesture tap fallback
-                    val rect = android.graphics.Rect()
+                    val rect = Rect()
                     nodeRef.getBoundsInScreen(rect)
                     if (rect.width() > 0 && rect.height() > 0) {
                         clicked = service.dispatchGestureTap(rect.centerX().toFloat(), rect.centerY().toFloat())
@@ -761,7 +780,7 @@ class DeviceActionExecutor(
         val command = when (actuator.type) {
             HardwareCapabilityType.FLASHLIGHT -> HardwareCommand.ToggleTorch(enable)
             HardwareCapabilityType.HAPTIC -> HardwareCommand.Vibrate(200L)
-            HardwareCapabilityType.AUDIO -> HardwareCommand.SetAudioMute(!enable)
+            HardwareCapabilityType.AUDIO -> HardwareCommand.SetAudioMute(enable)
             HardwareCapabilityType.DISPLAY -> HardwareCommand.WakeDisplay
             else -> HardwareCommand.ToggleTorch(enable)
         }
@@ -786,6 +805,18 @@ class DeviceActionExecutor(
         val path = service.captureScreenshot()
         return if (path != null) ActionResult(status = ActionResultStatus.SUCCESS, screenshotPath = path)
         else ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.SCREENSHOT_FAILED, message = "Screenshot capture failed")
+    }
+
+    private fun parseBoundsRect(boundsStr: String?): Rect? {
+        if (boundsStr.isNullOrBlank()) return null
+        return try {
+            val nums = boundsStr.replace("[^0-9, -]".toRegex(), "")
+                .split(" ", ",", "-")
+                .mapNotNull { it.trim().toIntOrNull() }
+            if (nums.size >= 4) Rect(nums[0], nums[1], nums[2], nums[3]) else null
+        } catch (e: Throwable) {
+            null
+        }
     }
 }
 

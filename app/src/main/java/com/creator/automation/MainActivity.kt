@@ -66,6 +66,12 @@ fun AgentControlWorkbenchScreen(context: Context) {
     val overlayState by AutomationOverlayState.currentState.collectAsState()
     val runtimeLogs by AgentRuntimeManager.runtimeLogs.collectAsState()
 
+    val lastSurfaces by AgentCore.lastDiscoveredSurfaces.collectAsState()
+    val lastCandidates by AgentCore.lastDiscoveredCandidates.collectAsState()
+
+    val db = remember { AppDatabase.getDatabase(context) }
+    val recentTransitions by db.discoveredTransitionDao().getAllRecentTransitions().collectAsState(initial = emptyList())
+
     val runtimeManager = remember { AgentRuntimeManager(context) }
     val allSessions by runtimeManager.allSessions.collectAsState(initial = emptyList())
 
@@ -217,6 +223,37 @@ fun AgentControlWorkbenchScreen(context: Context) {
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+
+        // 1.5 DISCOVERED APP FLOW & SURFACES CARD
+        if (lastSurfaces.isNotEmpty() || recentTransitions.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF212130))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("DISCOVERED APP FLOW & SURFACES", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF00E676))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Active Surfaces: ${lastSurfaces.size} | Safe Candidates: ${lastCandidates.count { it.safetyLevel == InteractionSafetyLevel.SAFE_TO_EXPLORE }} | Saved Transitions: ${recentTransitions.size}",
+                        fontSize = 10.sp,
+                        color = Color.White
+                    )
+
+                    if (recentTransitions.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Recent Flow Transition:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF80D8FF))
+                        val latest = recentTransitions.first()
+                        Text(
+                            text = "${latest.packageName}: [${latest.sourceStateSignature.take(12)}] --(${latest.actionType})--> [${latest.targetStateSignature.take(12)}] (Changed: ${latest.isStateChanged}, Conf: ${latest.confidence})",
+                            fontSize = 9.sp,
+                            color = Color(0xFFB0BEC5)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // 2. EXECUTION PIPELINE MONITORING CARD
         Card(
