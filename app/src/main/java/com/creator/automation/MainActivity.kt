@@ -407,6 +407,7 @@ fun DiagnosticControlCenter(context: Context) {
     val coroutineScope = rememberCoroutineScope()
 
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
+    val diagnosticState by AutomationAccessibilityService.diagnosticState.collectAsState()
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val isCameraRunning by CameraObservationProvider.isCameraRunning.collectAsState()
     val agentState by AgentCore.agentState.collectAsState()
@@ -494,6 +495,41 @@ fun DiagnosticControlCenter(context: Context) {
                         fontSize = 10.sp
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 1 Accessibility Diagnostics Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = if (diagnosticState.serviceConnected) Color(0xFFE8F5E9) else Color(0xFFFFF3E0))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 1 ACCESSIBILITY DIAGNOSTICS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (diagnosticState.serviceConnected) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
+                    Text(
+                        text = if (diagnosticState.serviceConnected) "CONNECTED" else "DISCONNECTED",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = if (diagnosticState.serviceConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Created: ${diagnosticState.serviceCreated} | Connected: ${diagnosticState.serviceConnected} | ConnTime: ${diagnosticState.connectedTimestamp}", fontSize = 10.sp)
+                Text("Events: count=${diagnosticState.eventCount} | lastType=${diagnosticState.lastEventType} | lastTime=${diagnosticState.lastEventTimestamp}", fontSize = 10.sp)
+                Text("Active Package: ${diagnosticState.activePackage}", fontSize = 10.sp)
+                Text("Root Window: available=${diagnosticState.rootAvailable} | class=${diagnosticState.rootNodeClass} | children=${diagnosticState.rootNodeChildCount}", fontSize = 10.sp)
+                Text("Observation Time: ${diagnosticState.observationTimestamp} | Disconnected: ${diagnosticState.serviceDisconnected} (${diagnosticState.disconnectTimestamp})", fontSize = 10.sp)
             }
         }
 
