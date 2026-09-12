@@ -685,24 +685,44 @@ class DeviceActionExecutor(
 
     private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String): ActionResult {
         val scrollableNode = snapshot.scrollableNodes.firstOrNull()?.nodeRef as? AccessibilityNodeInfo
+        var scrollDispatched = false
+
         if (scrollableNode != null) {
             val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-            if (scrollableNode.performAction(action)) {
-                // Post-scroll verification: Capture fresh snapshot to check for scroll progress
-                kotlinx.coroutines.delay(500L)
-                val afterRoot = service.getRootNode()
-                val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
-                val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+            scrollDispatched = scrollableNode.performAction(action)
+        }
 
-                if (beforeStateSig == afterStateSig) {
-                    Log.w(TAG, "SCROLL_NO_PROGRESS: Scroll action produced no UI state change")
-                    return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.STUCK, message = "Scroll action produced no state change (NO_PROGRESS)")
+        if (!scrollDispatched) {
+            val metrics = context.resources.displayMetrics
+            val startY = if (forward) metrics.heightPixels * 0.7f else metrics.heightPixels * 0.3f
+            val endY = if (forward) metrics.heightPixels * 0.3f else metrics.heightPixels * 0.7f
+            val centerX = metrics.widthPixels * 0.5f
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                val path = android.graphics.Path().apply {
+                    moveTo(centerX, startY)
+                    lineTo(centerX, endY)
                 }
-
-                return ActionResult(status = ActionResultStatus.SUCCESS)
+                val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 300)
+                val gesture = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+                scrollDispatched = service.dispatchGesture(gesture, null, null)
             }
         }
-        return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "No scrollable container found for scroll")
+
+        if (scrollDispatched) {
+            kotlinx.coroutines.delay(500L)
+            val afterRoot = service.getRootNode()
+            val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+            val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+            if (beforeStateSig == afterStateSig) {
+                Log.w(TAG, "SCROLL_NO_PROGRESS: Scroll action produced no UI state change")
+                return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.STUCK, message = "Scroll action produced no state change (NO_PROGRESS)")
+            }
+
+            return ActionResult(status = ActionResultStatus.SUCCESS)
+        }
+        return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Scroll dispatch failed")
     }
 
     private fun performGoBack(service: AutomationAccessibilityService): ActionResult {
