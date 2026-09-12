@@ -18,6 +18,22 @@ import java.io.FileOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+data class AccessibilityDiagnosticState(
+    val serviceCreated: Boolean = false,
+    val serviceConnected: Boolean = false,
+    val connectedTimestamp: Long = 0L,
+    val lastEventTimestamp: Long = 0L,
+    val lastEventType: String = "None",
+    val eventCount: Long = 0L,
+    val activePackage: String = "unknown",
+    val rootAvailable: Boolean = false,
+    val rootNodeClass: String = "unknown",
+    val rootNodeChildCount: Int = 0,
+    val observationTimestamp: Long = 0L,
+    val serviceDisconnected: Boolean = false,
+    val disconnectTimestamp: Long = 0L
+)
+
 class AutomationAccessibilityService : AccessibilityService() {
 
     companion object {
@@ -35,6 +51,9 @@ class AutomationAccessibilityService : AccessibilityService() {
         private val _lastEventTimestamp = MutableStateFlow<Long>(0L)
         val lastEventTimestamp: StateFlow<Long> = _lastEventTimestamp.asStateFlow()
 
+        private val _diagnosticState = MutableStateFlow(AccessibilityDiagnosticState())
+        val diagnosticState: StateFlow<AccessibilityDiagnosticState> = _diagnosticState.asStateFlow()
+
         private val _currentLearningMode = MutableStateFlow(LearningMode.IDLE)
         val currentLearningMode: StateFlow<LearningMode> = _currentLearningMode.asStateFlow()
 
@@ -45,14 +64,35 @@ class AutomationAccessibilityService : AccessibilityService() {
 
         var instance: AutomationAccessibilityService? = null
             private set
+
+        fun resetDiagnosticsForTesting() {
+            _diagnosticState.value = AccessibilityDiagnosticState()
+            _isServiceEnabled.value = false
+            _activePackageName.value = ""
+            _lastAccessibilityEvent.value = "None"
+            _lastEventTimestamp.value = 0L
+            instance = null
+        }
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+
+    override fun onCreate() {
+        super.onCreate()
+        _diagnosticState.value = _diagnosticState.value.copy(serviceCreated = true)
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceEnabled.value = true
+        val now = System.currentTimeMillis()
+        _diagnosticState.value = _diagnosticState.value.copy(
+            serviceCreated = true,
+            serviceConnected = true,
+            connectedTimestamp = now,
+            serviceDisconnected = false
+        )
         Log.i(TAG, "AutomationAccessibilityService connected")
     }
 
@@ -60,22 +100,38 @@ class AutomationAccessibilityService : AccessibilityService() {
         if (event == null) return
 
         val eventTypeName = AccessibilityEvent.eventTypeToString(event.eventType)
-        val pkg = event.packageName?.toString()
+        val pkg = event.packageName?.toString() ?: "unknown"
+        val now = System.currentTimeMillis()
 
-        _lastEventTimestamp.value = System.currentTimeMillis()
+        _lastEventTimestamp.value = now
         _lastAccessibilityEvent.value = "$eventTypeName ($pkg)"
 
-        if (!pkg.isNullOrBlank() && pkg != "com.creator.automation") {
+        if (pkg.isNotBlank() && pkg != "com.creator.automation" && pkg != "unknown") {
             _activePackageName.value = pkg
             Log.d(TAG, "PACKAGE_CHANGED: $pkg (event: $eventTypeName)")
         }
+
+        val currentDiag = _diagnosticState.value
+        val root = rootInActiveWindow
+        val hasRoot = root != null
+
+        _diagnosticState.value = currentDiag.copy(
+            lastEventTimestamp = now,
+            lastEventType = eventTypeName,
+            eventCount = currentDiag.eventCount + 1,
+            activePackage = if (pkg.isNotBlank() && pkg != "com.creator.automation") pkg else currentDiag.activePackage,
+            rootAvailable = hasRoot,
+            rootNodeClass = root?.className?.toString() ?: "unknown",
+            rootNodeChildCount = root?.childCount ?: 0,
+            observationTimestamp = if (hasRoot) now else currentDiag.observationTimestamp
+        )
 
         // Capture user interactions when in TRAINING mode
         if (_currentLearningMode.value == LearningMode.TRAINING && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             val clickedText = event.text.firstOrNull()?.toString()?.trim()
                 ?: event.contentDescription?.toString()?.trim()
 
-            if (!clickedText.isNullOrBlank() && !pkg.isNullOrBlank()) {
+            if (!clickedText.isNullOrBlank() && pkg != "unknown") {
                 Log.i(TAG, "USER_DEMONSTRATION_DETECTED: Package '$pkg', Clicked Text '$clickedText'")
                 recordUserDemonstration(pkg, clickedText)
             }
@@ -140,6 +196,12 @@ class AutomationAccessibilityService : AccessibilityService() {
             instance = null
         }
         _isServiceEnabled.value = false
+        val now = System.currentTimeMillis()
+        _diagnosticState.value = _diagnosticState.value.copy(
+            serviceConnected = false,
+            serviceDisconnected = true,
+            disconnectTimestamp = now
+        )
         Log.i(TAG, "AutomationAccessibilityService destroyed")
     }
 
@@ -149,22 +211,42 @@ class AutomationAccessibilityService : AccessibilityService() {
     fun getDiagnosticsSummary(): String {
         val root = rootInActiveWindow
         val info = serviceInfo
+        val state = _diagnosticState.value
         return "AccessibilityService:\n" +
-                "connected = true\n" +
+                "serviceCreated = ${state.serviceCreated}\n" +
+                "serviceConnected = ${state.serviceConnected}\n" +
+                "connectedTimestamp = ${state.connectedTimestamp}\n" +
                 "serviceInstance = ${this.javaClass.simpleName}\n" +
                 "canRetrieveWindowContent = ${info?.canRetrieveWindowContent ?: true}\n" +
                 "canPerformGestures = ${Build.VERSION.SDK_INT >= Build.VERSION_CODES.N}\n" +
-                "activeWindow = ${root != null}\n" +
-                "package = ${root?.packageName ?: _activePackageName.value ?: "unknown"}\n" +
-                "lastAccessibilityEvent = ${_lastAccessibilityEvent.value}\n" +
-                "lastEventTime = ${_lastEventTimestamp.value}"
+                "rootAvailable = ${root != null}\n" +
+                "rootNodeClass = ${root?.className ?: state.rootNodeClass}\n" +
+                "rootNodeChildCount = ${root?.childCount ?: state.rootNodeChildCount}\n" +
+                "activePackage = ${root?.packageName ?: _activePackageName.value ?: state.activePackage}\n" +
+                "eventCount = ${state.eventCount}\n" +
+                "lastEventType = ${state.lastEventType}\n" +
+                "lastEventTimestamp = ${state.lastEventTimestamp}\n" +
+                "serviceDisconnected = ${state.serviceDisconnected}\n" +
+                "disconnectTimestamp = ${state.disconnectTimestamp}"
     }
 
     /**
      * Retrieves the current root AccessibilityNodeInfo.
      */
     fun getRootNode(): AccessibilityNodeInfo? {
-        return rootInActiveWindow
+        val root = rootInActiveWindow
+        val now = System.currentTimeMillis()
+        if (root != null) {
+            _diagnosticState.value = _diagnosticState.value.copy(
+                rootAvailable = true,
+                rootNodeClass = root.className?.toString() ?: "unknown",
+                rootNodeChildCount = root.childCount,
+                observationTimestamp = now
+            )
+        } else {
+            _diagnosticState.value = _diagnosticState.value.copy(rootAvailable = false)
+        }
+        return root
     }
 
     /**
