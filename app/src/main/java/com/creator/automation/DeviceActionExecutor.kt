@@ -489,6 +489,19 @@ class DeviceActionExecutor(
         val editableNode = res.match.node.nodeRef as? AccessibilityNodeInfo
             ?: return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Editable node reference missing")
 
+        val boundsRect = android.graphics.Rect()
+        editableNode.getBoundsInScreen(boundsRect)
+        val targetBounds = TargetBounds(boundsRect.left, boundsRect.top, boundsRect.right, boundsRect.bottom)
+
+        AutomationOverlayState.updateState(
+            actionState = VisualizationActionState.TYPING,
+            targetText = redactSensitiveText(textToType),
+            targetViewId = res.match.node.viewIdResourceName,
+            targetClassName = res.match.node.className,
+            targetBounds = targetBounds,
+            packageName = snapshot.packageName
+        )
+
         // 1. Focus node if focusable
         if (!editableNode.isFocused) {
             editableNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
@@ -661,22 +674,7 @@ class DeviceActionExecutor(
             }
         }
 
-        // 3. Mechanism 3: FOCUSED EDITABLE NODE CLICK (Triggers submit on search input views)
-        if (focusedEditable != null) {
-            val editableRef = focusedEditable.nodeRef as? AccessibilityNodeInfo
-            if (editableRef != null) {
-                var targetNode: AccessibilityNodeInfo? = editableRef
-                while (targetNode != null && !targetNode.isClickable) {
-                    targetNode = targetNode.parent
-                }
-                if (targetNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) {
-                    Log.i(TAG, "SUBMIT_INPUT_SUBMITTED: Performed click on focused editable node")
-                    return ActionResult(status = ActionResultStatus.SUCCESS, matchedNode = focusedEditable, matchMethod = "FOCUSED_NODE_ACTION")
-                }
-            }
-        }
-
-        // 4. Mechanism 4: UNSUPPORTED SUBMISSION MECHANISM
+        // 3. UNSUPPORTED SUBMISSION MECHANISM
         Log.w(TAG, "SUBMIT_INPUT_UNSUPPORTED_MECHANISM: No submission mechanism succeeded for package '${snapshot.packageName}'")
         return ActionResult(
             status = ActionResultStatus.FAILED,

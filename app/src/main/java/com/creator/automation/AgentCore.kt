@@ -134,10 +134,20 @@ class AgentCore(
             logAgentActivity("WORLD_STATE_BUILT: Pkg=${appWorldState.packageName}, Interactive=${appWorldState.interactiveNodes.size}, ActionGraphTransitions=${actionGraph.availableTransitions.size}")
         }
 
+        if (_agentState.value == AgentState.CANCELLED) {
+            logAgentActivity("AGENT_CANCELLED: Aborting execution prior to resolving step")
+            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, null, VerificationStatus.FAILED, AgentState.CANCELLED)
+        }
+
         // 2. RESOLVING & PLANNING & EXECUTING (One bounded cycle)
         _agentState.value = AgentState.RESOLVING
         AutomationOverlayState.updateState(VisualizationActionState.TARGET_FOUND, targetText = taskDescription, packageName = primaryObservation.packageName)
         logAgentActivity("AGENT_RESOLVING: Resolving task '$taskDescription' against state ${primaryObservation.stateSignature}")
+
+        if (_agentState.value == AgentState.CANCELLED) {
+            logAgentActivity("AGENT_CANCELLED: Aborting execution prior to action dispatch")
+            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, null, VerificationStatus.FAILED, AgentState.CANCELLED)
+        }
 
         _agentState.value = AgentState.EXECUTING
         logAgentActivity("AGENT_EXECUTING: Executing next step for task '$taskDescription'")
@@ -147,6 +157,11 @@ class AgentCore(
             trigger = trigger,
             globalAutonomousEnabled = globalAutonomousEnabled
         )
+
+        if (_agentState.value == AgentState.CANCELLED) {
+            logAgentActivity("AGENT_CANCELLED: Aborting step verification following user cancellation")
+            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, result, VerificationStatus.FAILED, AgentState.CANCELLED)
+        }
 
         // 3. VERIFYING (Observe after action - Semantic + Visual Screen + Camera verification)
         _agentState.value = AgentState.VERIFYING

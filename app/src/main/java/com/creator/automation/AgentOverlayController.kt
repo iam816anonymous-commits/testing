@@ -5,7 +5,8 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -23,6 +24,7 @@ class AgentOverlayController(private val context: Context) {
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var overlayView: LinearLayout? = null
     private var cursorView: View? = null
     private var statusTextView: TextView? = null
@@ -34,8 +36,16 @@ class AgentOverlayController(private val context: Context) {
         instance = this
     }
 
-    fun showOverlay() {
-        if (isOverlayShowing || windowManager == null) return
+    private fun runOnMainThread(action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action()
+        } else {
+            mainHandler.post(action)
+        }
+    }
+
+    fun showOverlay() = runOnMainThread {
+        if (isOverlayShowing || windowManager == null) return@runOnMainThread
 
         try {
             val root = LinearLayout(context).apply {
@@ -146,7 +156,7 @@ class AgentOverlayController(private val context: Context) {
         }
     }
 
-    fun updateOverlayState(state: AutomationVisualizationState) {
+    fun updateOverlayState(state: AutomationVisualizationState) = runOnMainThread {
         if (!isOverlayShowing) {
             showOverlay()
         }
@@ -189,8 +199,8 @@ class AgentOverlayController(private val context: Context) {
         }
     }
 
-    fun hideOverlay() {
-        if (windowManager == null) return
+    fun hideOverlay() = runOnMainThread {
+        if (windowManager == null) return@runOnMainThread
         try {
             if (cursorView != null) {
                 windowManager.removeView(cursorView)

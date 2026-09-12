@@ -103,9 +103,9 @@ class FlashlightActuator : HardwareActuator {
     private fun ensureCallbackRegistered(context: Context, cameraManager: CameraManager) {
         if (!callbackRegistered && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
-                cameraManager.registerTorchCallback(torchCallback, null)
+                cameraManager.registerTorchCallback(torchCallback, android.os.Handler(android.os.Looper.getMainLooper()))
                 callbackRegistered = true
-                Log.i(TAG, "TORCH_CALLBACK_REGISTERED")
+                Log.i(TAG, "TORCH_CALLBACK_REGISTERED on Main Looper")
             } catch (e: Throwable) {
                 Log.w(TAG, "Failed to register TorchCallback: ${e.message}")
             }
@@ -137,14 +137,17 @@ class FlashlightActuator : HardwareActuator {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 cm.setTorchMode(cameraId, command.enable)
-                // Short wait for callback to fire
-                Thread.sleep(150L)
-                val observed = isTorchEnabled
-                val isVerified = observed == command.enable
-                Log.i(TAG, "SET_TORCH_MODE: enabled=${command.enable}, observed=$observed, verified=$isVerified")
+                Log.i(TAG, "SET_TORCH_MODE_DISPATCHED: enabled=${command.enable}")
+
+                var attempts = 0
+                while (isTorchEnabled != command.enable && attempts < 6) {
+                    Thread.sleep(50L)
+                    attempts++
+                }
+
                 HardwareActionResult(
                     success = true,
-                    message = "Torch mode set to ${command.enable} (Verified: $isVerified)",
+                    message = "Torch mode set to ${command.enable}",
                     state = command.enable
                 )
             } else {
@@ -164,6 +167,11 @@ class FlashlightActuator : HardwareActuator {
 
     override fun verify(context: Context, expectedState: Any): Boolean {
         if (expectedState !is Boolean) return false
+        var attempts = 0
+        while (isTorchEnabled != expectedState && attempts < 6) {
+            Thread.sleep(50L)
+            attempts++
+        }
         val currentState = observeState(context)
         return currentState == expectedState
     }

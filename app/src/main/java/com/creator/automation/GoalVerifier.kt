@@ -99,7 +99,9 @@ class GoalVerifier(
 
         val descLower = taskDescription.lowercase()
         val expectedState: Any = when {
-            descLower.contains("off") || descLower.contains("disable") || descLower.contains("mute") -> false
+            descLower.contains("unmute") -> false
+            descLower.contains("mute") || descLower.contains("silent") -> true
+            descLower.contains("off") || descLower.contains("disable") -> false
             else -> true
         }
 
