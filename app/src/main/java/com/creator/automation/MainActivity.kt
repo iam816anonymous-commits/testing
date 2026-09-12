@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    DiagnosticControlCenter(context = this)
+                    AgentControlWorkbenchScreen(context = this)
                 }
             }
         }
@@ -52,19 +52,22 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun DiagnosticControlCenter(context: Context) {
+fun AgentControlWorkbenchScreen(context: Context) {
     val coroutineScope = rememberCoroutineScope()
 
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val isCameraRunning by CameraObservationProvider.isCameraRunning.collectAsState()
     val agentState by AgentCore.agentState.collectAsState()
+    val activeSession by AgentRuntimeManager.activeSession.collectAsState()
     val overlayState by AutomationOverlayState.currentState.collectAsState()
     val runtimeLogs by AgentRuntimeManager.runtimeLogs.collectAsState()
 
+    var taskInputText by remember { mutableStateOf("Open Chrome and search for Telugu movies") }
     var selectedTab by remember { mutableIntStateOf(0) }
     var statusText by remember { mutableStateOf("Ready") }
 
+    val runtimeManager = remember { AgentRuntimeManager(context) }
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
 
@@ -76,8 +79,29 @@ fun DiagnosticControlCenter(context: Context) {
     val reportGenerator = remember { ReportGenerator(context) }
     var exportedReportFiles by remember { mutableStateOf<Map<String, File>>(emptyMap()) }
 
-    val scrollState = rememberScrollState()
+    val appResolver = remember { AppResolver(context) }
+    var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+    var selectedAppPackage by remember { mutableStateOf<String?>(null) }
+    var isAppDropdownExpanded by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val apps = appResolver.getInstalledLauncherApps()
+            installedApps = apps
+            if (apps.isNotEmpty()) {
+                selectedAppPackage = apps.first().packageName
+            }
+        }
+    }
+
+    // Permission launcher for Camera & Vibrate permissions
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        deviceProfile = scanner.scanDeviceProfile()
+    }
+
+    // Screen capture launcher for MediaProjection
     val screenCaptureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -91,6 +115,19 @@ fun DiagnosticControlCenter(context: Context) {
         }
     }
 
+    // Automatic permission interlock check on startup
+    LaunchedEffect(Unit) {
+        permissionLauncher.launch(
+            arrayOf(
+                android.Manifest.permission.CAMERA,
+                android.Manifest.permission.VIBRATE,
+                android.Manifest.permission.WAKE_LOCK
+            )
+        )
+    }
+
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -99,56 +136,268 @@ fun DiagnosticControlCenter(context: Context) {
         verticalArrangement = Arrangement.Top
     ) {
         Text(
-            text = "JARVIS DIAGNOSTIC & CONTROL CENTER",
+            text = "JARVIS AGENT CONTROL WORKBENCH",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            text = "Physical Target: ${deviceProfile.manufacturer} ${deviceProfile.model} (API ${deviceProfile.apiLevel})",
+            text = "Physical Device: ${deviceProfile.manufacturer} ${deviceProfile.model} (API ${deviceProfile.apiLevel})",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Diagnostic Overlay State Card
+        // 1. LIVE EXECUTION STATUS PANEL
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8EAF6))
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2C))
         ) {
-            Column(modifier = Modifier.padding(10.dp)) {
+            Column(modifier = Modifier.padding(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "LIVE OVERLAY DEBUGGER",
+                        text = "LIVE EXECUTION STATUS",
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
-                        color = Color(0xFF1A237E)
+                        color = Color(0xFF80D8FF)
                     )
+                    Surface(
+                        color = when (agentState) {
+                            AgentState.EXECUTING -> Color(0xFF2E7D32)
+                            AgentState.OBSERVING, AgentState.RESOLVING, AgentState.VERIFYING -> Color(0xFF1565C0)
+                            AgentState.COMPLETED -> Color(0xFF00C853)
+                            AgentState.PAUSED, AgentState.NEEDS_USER_INPUT -> Color(0xFFE65100)
+                            AgentState.FAILED, AgentState.CANCELLED -> Color(0xFFC62828)
+                            else -> Color(0xFF424242)
+                        },
+                        shape = MaterialTheme.shapes.extraSmall
+                    ) {
+                        Text(
+                            text = agentState.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                val currentTaskDesc = activeSession?.taskDescription ?: "No task currently running"
+                Text("Active Task: $currentTaskDesc", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+
+                if (overlayState.targetText != null || overlayState.targetBounds != null) {
                     Text(
-                        text = overlayState.actionState.name,
-                        fontWeight = FontWeight.Bold,
+                        text = "Target: '${overlayState.targetText ?: "UI element"}' ${overlayState.targetBounds?.let { "[${it.left},${it.top}][${it.right},${it.bottom}]" } ?: ""}",
                         fontSize = 10.sp,
-                        color = Color(0xFF283593)
+                        color = Color(0xFFB0BEC5)
                     )
                 }
-                if (overlayState.targetBounds != null) {
-                    val b = overlayState.targetBounds!!
-                    Text(
-                        text = "Bounds: [${b.left}, ${b.top}][${b.right}, ${b.bottom}] | Cursor: (${overlayState.cursorX}, ${overlayState.cursorY})",
-                        fontSize = 10.sp
-                    )
+
+                if (activeSession?.cancellationReason != null) {
+                    Text("Reason: ${activeSession?.cancellationReason}", fontSize = 10.sp, color = Color(0xFFFF8A80))
+                } else if (!isAccessibilityEnabled) {
+                    Text("Blocker: Accessibility Service is DISABLED in Settings", fontSize = 10.sp, color = Color(0xFFFF8A80))
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Navigation Tabs (Overview, Tests, Capabilities, Sensors, Actuators, Permissions, Failures, Evidence, Logs)
+        // 2. NATURAL LANGUAGE COMMAND CENTER
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("AGENT COMMAND CENTER", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF212121))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = taskInputText,
+                    onValueChange = { taskInputText = it },
+                    label = { Text("Natural Language Command", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = false,
+                    maxLines = 3
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                statusText = "Dispatching command: '$taskInputText'"
+                                runtimeManager.startOrResumeTaskSession(taskInputText)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B5E20))
+                    ) {
+                        Text("RUN TASK", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                statusText = "User pressed STOP"
+                                runtimeManager.cancelActiveSession("User clicked STOP button")
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C))
+                    ) {
+                        Text("STOP", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 3. QUICK SYSTEM CONTROLS & HARDWARE ACTUATORS
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFECEFF1))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("QUICK CAPABILITY CONTROLS", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF37474F))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Navigation Row
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Press Home") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp)) {
+                        Text("HOME", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Press Back") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp)) {
+                        Text("BACK", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Open Recents") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp)) {
+                        Text("RECENTS", fontSize = 10.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Perception Row
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Read visible UI") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))) {
+                        Text("READ SCREEN", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Scroll down") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))) {
+                        Text("SCROLL DOWN", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Scroll up") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF455A64))) {
+                        Text("SCROLL UP", fontSize = 10.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Hardware Actuators Row
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Turn on flashlight") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57F17))) {
+                        Text("FLASH ON", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Turn off flashlight") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))) {
+                        Text("FLASH OFF", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Vibrate phone") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A148C))) {
+                        Text("HAPTIC", fontSize = 10.sp)
+                    }
+                    Button(onClick = { coroutineScope.launch { runtimeManager.startOrResumeTaskSession("Mute audio") } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(2.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF880E4F))) {
+                        Text("MUTE AUDIO", fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 4. DYNAMIC APP LAUNCHER
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("INSTALLED APP LAUNCHER", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF1B5E20))
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    val appLabel = installedApps.find { it.packageName == selectedAppPackage }?.appLabel ?: "Select Application"
+                    Button(onClick = { isAppDropdownExpanded = true }, modifier = Modifier.weight(1f)) {
+                        Text("App: $appLabel", fontSize = 11.sp)
+                    }
+
+                    DropdownMenu(
+                        expanded = isAppDropdownExpanded,
+                        onDismissRequest = { isAppDropdownExpanded = false }
+                    ) {
+                        installedApps.take(15).forEach { app ->
+                            DropdownMenuItem(
+                                text = { Text("${app.appLabel} (${app.packageName})", fontSize = 11.sp) },
+                                onClick = {
+                                    selectedAppPackage = app.packageName
+                                    isAppDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Button(
+                        onClick = {
+                            val pkg = selectedAppPackage
+                            val targetLabel = installedApps.find { it.packageName == pkg }?.appLabel ?: pkg
+                            if (targetLabel != null) {
+                                coroutineScope.launch {
+                                    runtimeManager.startOrResumeTaskSession("Open $targetLabel")
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                    ) {
+                        Text("OPEN APP", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // System Services Setup Buttons
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!isAccessibilityEnabled) {
+                Button(onClick = { openAccessibilitySettings(context) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))) {
+                    Text("Enable Accessibility", fontSize = 10.sp)
+                }
+            }
+            if (!isScreenAuthorized) {
+                Button(
+                    onClick = {
+                        val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+                        if (projectionManager != null) {
+                            screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                ) {
+                    Text("Grant Screen Share", fontSize = 10.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 5. DEVELOPER / DIAGNOSTIC TABS
         ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
             val tabTitles = listOf(
                 "Overview", "Tests", "Capabilities", "Sensors",

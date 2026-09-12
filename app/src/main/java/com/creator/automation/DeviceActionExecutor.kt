@@ -730,7 +730,7 @@ class DeviceActionExecutor(
 
         val descLower = goalDesc.lowercase()
         val enable = when {
-            descLower.contains("off") || descLower.contains("disable") || descLower.contains("mute") -> false
+            descLower.contains("unmute") || descLower.contains("off") || descLower.contains("disable") -> false
             else -> true
         }
 
