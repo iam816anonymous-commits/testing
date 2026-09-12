@@ -95,7 +95,11 @@ class DeviceActionExecutor(
             ActionType.PRESS_HOME -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_HOME, "HOME")
             ActionType.PRESS_RECENTS -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_RECENTS, "RECENTS")
             ActionType.CAPTURE_SCREEN -> performCaptureScreen(service, beforeSnapshot)
-            ActionType.READ_VISIBLE_UI, ActionType.REFRESH_OBSERVATION -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
+            ActionType.READ_VISIBLE_UI, ActionType.REFRESH_OBSERVATION -> ActionResult(
+                status = ActionResultStatus.SUCCESS,
+                snapshot = beforeSnapshot,
+                message = "OBSERVATION_AVAILABLE: Captured ${beforeSnapshot.totalNodeCount} UI nodes in '${beforeSnapshot.packageName}'"
+            )
             else -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
         }
 

@@ -71,4 +71,24 @@ class DeviceActionExecutorTest {
         assertFalse(result.success)
         assertTrue(result.failureReason?.contains("PACKAGE_MATCH") == true)
     }
+
+    @Test
+    fun testPreconditionEditablePresent_Success() {
+        val context = org.mockito.Mockito.mock(android.content.Context::class.java)
+        val resolver = ActionResolver()
+        val auditDao = org.mockito.Mockito.mock(ActionAuditDao::class.java)
+        val executor = DeviceActionExecutor(context, resolver, auditDao)
+
+        val snapshot = UiSnapshot(
+            packageName = "com.android.chrome",
+            editableNodes = listOf(UiNodeInfo(text = "Search or type web address", isEditable = true))
+        )
+
+        val preconditions = listOf(
+            ActionPrecondition(PreconditionType.EDITABLE_PRESENT)
+        )
+
+        val result = executor.checkPreconditions(preconditions, snapshot)
+        assertTrue(result.success)
+    }
 }
