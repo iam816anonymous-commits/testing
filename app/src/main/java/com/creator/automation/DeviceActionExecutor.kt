@@ -487,10 +487,35 @@ class DeviceActionExecutor(
 
         // Stage 1: Observe & Resolve Editable Target on Fresh Window
         val freshRoot = service.getRootNode()
-        val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+        var freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
 
         var res = actionResolver.resolveEditableTarget(freshSnapshot, targetLabel)
-        val match = res.match
+        var match = res.match
+
+        // Generic Search Overlay Auto-Opening Fallback:
+        // If no editable field is open, check if target query resolves to a clickable non-editable control (e.g. Search icon/button).
+        if (match == null && !targetLabel.isNullOrBlank()) {
+            val nonEditableCandidate = actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetLabel)
+            if (nonEditableCandidate.match != null && !nonEditableCandidate.isAmbiguous) {
+                val searchBtnNode = nonEditableCandidate.match.node.nodeRef as? AccessibilityNodeInfo
+                if (searchBtnNode != null) {
+                    Log.i(TAG, "TYPE_TEXT_SEARCH_OVERLAY_FALLBACK: Found non-editable search control '${targetLabel}'. Clicking to open search overlay...")
+                    var targetBtn: AccessibilityNodeInfo? = searchBtnNode
+                    while (targetBtn != null && !targetBtn.isClickable) {
+                        targetBtn = targetBtn.parent
+                    }
+                    val clicked = targetBtn?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+                    if (clicked) {
+                        kotlinx.coroutines.delay(400L)
+                        val postClickRoot = service.getRootNode()
+                        freshSnapshot = ActionResolver.captureSnapshot(postClickRoot, service.packageName ?: "")
+                        res = actionResolver.resolveEditableTarget(freshSnapshot, null)
+                        match = res.match
+                    }
+                }
+            }
+        }
+
         if (match == null) {
             Log.w(TAG, "TYPE_TEXT_DIAGNOSTIC: Stage 1 failed. No editable field found in package '${freshSnapshot.packageName}' for query '$targetLabel'")
             return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "No editable field found for TYPE_TEXT")
