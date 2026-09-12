@@ -32,6 +32,40 @@ class TaskResolver(
         val taskRecord = TaskRecord(description = taskDescription)
         val descLower = taskDescription.trim().lowercase()
 
+        // 0. Check for Hardware Actuator match
+        val actuatorMatch = HardwareActuatorRegistry.findActuatorForGoal(taskDescription)
+        if (actuatorMatch != null) {
+            val steps = listOf(
+                WorkflowStep(
+                    id = "step_1",
+                    action = AutomationAction(
+                        type = ActionType.TOGGLE_HARDWARE,
+                        targetValue = taskDescription,
+                        inputData = taskDescription,
+                        semantics = ActionSemantics.REPEATABLE
+                    )
+                )
+            )
+            val hwWorkflow = Workflow(
+                id = "hardware_wf_${System.currentTimeMillis()}",
+                name = "Hardware Control Workflow: $taskDescription",
+                steps = steps,
+                timeoutMs = 10000L
+            )
+            Log.i(TAG, "TASK_RESOLVED: HARDWARE_ACTUATOR_MATCH -> '${actuatorMatch.name}'")
+            return TaskResolution(
+                taskRecord = taskRecord.copy(
+                    status = TaskStatus.EXECUTING.name,
+                    source = TaskSource.LOCAL_RULE.name,
+                    resolutionReason = ResolutionReason.LOCAL_WORKFLOW_MATCH.name,
+                    totalSteps = 1
+                ),
+                source = TaskSource.LOCAL_RULE,
+                resolutionReason = ResolutionReason.LOCAL_WORKFLOW_MATCH,
+                localWorkflow = hwWorkflow
+            )
+        }
+
         // 1. Check for matching LearnedWorkflow
         if (currentSnapshot != null) {
             val stateSig = StateSignatureGenerator.generateSignature(currentSnapshot)

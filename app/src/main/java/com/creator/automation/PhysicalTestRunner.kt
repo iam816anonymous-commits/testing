@@ -438,7 +438,56 @@ object PhysicalTestRegistry {
             )
         )
 
-        // 6. Safety Approval Block Example
+        // 6. Hardware - Native Flashlight Actuator Test
+        tests.add(
+            PhysicalTestCase(
+                testId = "TEST-HW-001",
+                testName = "Native Flashlight CameraManager Actuator",
+                category = PhysicalTestCategory.INPUT_INTERACTION,
+                executeBlock = { ctx ->
+                    val start = System.currentTimeMillis()
+                    val trace = mutableListOf<String>()
+                    val actuator = FlashlightActuator()
+
+                    val isPresent = actuator.detect(ctx)
+                    val canControl = actuator.canControl(ctx)
+                    trace.add("Flashlight detected=$isPresent, canControl=$canControl")
+
+                    val status = when {
+                        !isPresent -> PhysicalTestStatus.UNSUPPORTED
+                        !canControl -> PhysicalTestStatus.BLOCKED
+                        else -> PhysicalTestStatus.PASS
+                    }
+
+                    TestResult(
+                        testId = "TEST-HW-001",
+                        testName = "Native Flashlight CameraManager Actuator",
+                        category = PhysicalTestCategory.INPUT_INTERACTION,
+                        startTime = start,
+                        endTime = System.currentTimeMillis(),
+                        status = status,
+                        preconditions = "CameraManager Service Available",
+                        deviceStateSummary = "Flashlight present=$isPresent, controllable=$canControl",
+                        actionAttempted = "Query CameraManager Flash Torch capability",
+                        targetResolution = "FlashlightActuator",
+                        candidateCount = if (isPresent) 1 else 0,
+                        selectedTarget = "Camera Flash Torch",
+                        mechanismUsed = "CameraManager.setTorchMode (API 23+)",
+                        observationBefore = "CameraManager characteristics queried",
+                        observationAfter = "Flash torch capability state verified",
+                        expectedOutcome = "Flashlight hardware detected and API support confirmed",
+                        actualOutcome = "Flashlight detected=$isPresent, controllable=$canControl",
+                        dispatchResult = "HARDWARE_CHECK_COMPLETE",
+                        verificationResult = if (status == PhysicalTestStatus.PASS) "VERIFIED_SUCCESS" else "BLOCKED",
+                        failureReason = if (!canControl) "CAMERA permission not granted or torch hardware unsupported" else null,
+                        evidence = "FlashlightActuator verified: present=$isPresent, allowed=$canControl",
+                        diagnosticTrace = trace
+                    )
+                }
+            )
+        )
+
+        // 7. Safety Approval Block Example
         tests.add(
             PhysicalTestCase(
                 testId = "TEST-SAF-001",

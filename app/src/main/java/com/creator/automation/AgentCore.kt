@@ -33,6 +33,33 @@ class AgentCore(
             current.add(0, "[${System.currentTimeMillis() % 100000}] $message")
             _recentAgentLogs.value = current.take(20)
         }
+
+        fun pauseAgent() {
+            _agentState.value = AgentState.PAUSED
+            logAgentActivity("AGENT_PAUSED: Agent explicitly paused by user")
+        }
+
+        fun resumeAgent() {
+            _agentState.value = AgentState.IDLE
+            logAgentActivity("AGENT_RESUMED: Agent resumed from pause")
+        }
+
+        fun cancelAgent() {
+            _agentState.value = AgentState.CANCELLED
+            logAgentActivity("AGENT_CANCELLED: Agent task execution cancelled")
+        }
+    }
+
+    fun pauseAgent() {
+        Companion.pauseAgent()
+    }
+
+    fun resumeAgent() {
+        Companion.resumeAgent()
+    }
+
+    fun cancelAgent() {
+        Companion.cancelAgent()
     }
 
     suspend fun executeTaskStep(
@@ -68,6 +95,7 @@ class AgentCore(
 
         // 1. OBSERVING (Observe before action - Multi-Source Hierarchy: Accessibility -> Screen -> Camera)
         _agentState.value = AgentState.OBSERVING
+        AutomationOverlayState.updateState(VisualizationActionState.OBSERVING)
         logAgentActivity("AGENT_OBSERVING: Capturing current device observation (Primary: Accessibility)")
         var primaryObservation = observationProvider.captureObservation()
 
@@ -98,8 +126,17 @@ class AgentCore(
             }
         }
 
+        // Build ApplicationWorldState & ActionGraph from active snapshot
+        val snap = primaryObservation.snapshot
+        if (snap != null) {
+            val appWorldState = ApplicationWorldState.fromSnapshot(snap)
+            val actionGraph = ActionGraph.buildFromWorldState(appWorldState)
+            logAgentActivity("WORLD_STATE_BUILT: Pkg=${appWorldState.packageName}, Interactive=${appWorldState.interactiveNodes.size}, ActionGraphTransitions=${actionGraph.availableTransitions.size}")
+        }
+
         // 2. RESOLVING & PLANNING & EXECUTING (One bounded cycle)
         _agentState.value = AgentState.RESOLVING
+        AutomationOverlayState.updateState(VisualizationActionState.TARGET_FOUND, targetText = taskDescription, packageName = primaryObservation.packageName)
         logAgentActivity("AGENT_RESOLVING: Resolving task '$taskDescription' against state ${primaryObservation.stateSignature}")
 
         _agentState.value = AgentState.EXECUTING
@@ -113,6 +150,7 @@ class AgentCore(
 
         // 3. VERIFYING (Observe after action - Semantic + Visual Screen + Camera verification)
         _agentState.value = AgentState.VERIFYING
+        AutomationOverlayState.updateState(VisualizationActionState.VERIFYING, targetText = taskDescription, packageName = primaryObservation.packageName)
         val postObs = observationProvider.captureObservation()
 
         var visualVerificationDetails = ""
@@ -125,7 +163,15 @@ class AgentCore(
             visualVerificationDetails += ", cameraChange=${postCameraObs.visualChangeState}"
         }
 
-        val verificationStatus = if (result.status == ActionResultStatus.SUCCESS) {
+        val goalVerifier = GoalVerifier()
+        val isHardwareTask = HardwareActuatorRegistry.findActuatorForGoal(taskDescription) != null
+        val hwVerifyRes = if (isHardwareTask) goalVerifier.verifyHardwareGoal(taskDescription, context) else null
+
+        if (hwVerifyRes != null) {
+            logAgentActivity("HARDWARE_GOAL_VERIFICATION: Verified=${hwVerifyRes.isVerified}, Details='${hwVerifyRes.explanation}'")
+        }
+
+        val verificationStatus = if (result.status == ActionResultStatus.SUCCESS && (hwVerifyRes == null || hwVerifyRes.isVerified)) {
             VerificationStatus.SUCCESSFULLY_VERIFIED
         } else {
             VerificationStatus.FAILED
@@ -140,14 +186,17 @@ class AgentCore(
         val nextState = when {
             result.status == ActionResultStatus.SUCCESS -> {
                 logAgentActivity("AGENT_COMPLETED: Step completed successfully")
+                AutomationOverlayState.updateState(VisualizationActionState.SUCCESS, targetText = taskDescription, packageName = primaryObservation.packageName)
                 AgentState.COMPLETED
             }
             result.status == ActionResultStatus.BLOCKED -> {
                 logAgentActivity("AGENT_PAUSED: Execution blocked (${result.reason})")
+                AutomationOverlayState.updateState(VisualizationActionState.FAILED, targetText = taskDescription, packageName = primaryObservation.packageName)
                 AgentState.PAUSED
             }
             else -> {
                 _agentState.value = AgentState.RECOVERING
+                AutomationOverlayState.updateState(VisualizationActionState.RECOVERING, targetText = taskDescription, packageName = primaryObservation.packageName)
                 val recoveryOutcome = recoveryManager.evaluateRecovery(1, result, _currentTaskRecord.value)
                 logAgentActivity("AGENT_RECOVERING: Failure recovery outcome = $recoveryOutcome")
                 when (recoveryOutcome) {
@@ -170,18 +219,4 @@ class AgentCore(
         )
     }
 
-    fun pauseAgent() {
-        _agentState.value = AgentState.PAUSED
-        logAgentActivity("AGENT_PAUSED: Agent explicitly paused by user")
-    }
-
-    fun resumeAgent() {
-        _agentState.value = AgentState.IDLE
-        logAgentActivity("AGENT_RESUMED: Agent resumed from pause")
-    }
-
-    fun cancelAgent() {
-        _agentState.value = AgentState.CANCELLED
-        logAgentActivity("AGENT_CANCELLED: Agent task execution cancelled")
-    }
 }

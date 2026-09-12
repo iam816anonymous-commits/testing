@@ -49,11 +49,22 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
+    private var overlayController: AgentOverlayController? = null
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceEnabled.value = true
-        Log.i(TAG, "AutomationAccessibilityService connected")
+        overlayController = AgentOverlayController(this)
+
+        // Observe AutomationOverlayState updates to drive floating accessibility overlay on Main thread
+        serviceScope.launch(Dispatchers.Main) {
+            AutomationOverlayState.currentState.collect { state ->
+                overlayController?.updateOverlayState(state)
+            }
+        }
+
+        Log.i(TAG, "AutomationAccessibilityService connected and AgentOverlayController initialized")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

@@ -85,4 +85,37 @@ class GoalVerifier(
             explanation = "Task goal criteria verified successfully on current screen"
         )
     }
+
+    fun verifyHardwareGoal(
+        taskDescription: String,
+        context: android.content.Context
+    ): GoalVerificationResult {
+        val actuator = HardwareActuatorRegistry.findActuatorForGoal(taskDescription)
+            ?: return GoalVerificationResult(
+                status = GoalVerificationStatus.UNKNOWN,
+                isVerified = false,
+                explanation = "No matching hardware actuator found for goal '$taskDescription'"
+            )
+
+        val descLower = taskDescription.lowercase()
+        val expectedState: Any = when {
+            descLower.contains("off") || descLower.contains("disable") || descLower.contains("mute") -> false
+            else -> true
+        }
+
+        val isVerified = actuator.verify(context, expectedState)
+        return if (isVerified) {
+            GoalVerificationResult(
+                status = GoalVerificationStatus.GOAL_VERIFIED,
+                isVerified = true,
+                explanation = "Hardware actuator '${actuator.name}' state verified matches expected ($expectedState)"
+            )
+        } else {
+            GoalVerificationResult(
+                status = GoalVerificationStatus.GOAL_NOT_REACHED,
+                isVerified = false,
+                explanation = "Hardware actuator '${actuator.name}' state mismatch. Expected $expectedState"
+            )
+        }
+    }
 }
