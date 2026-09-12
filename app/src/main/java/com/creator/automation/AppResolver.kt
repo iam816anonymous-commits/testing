@@ -13,11 +13,6 @@ enum class AppResolutionStatus {
     INVALID_QUERY
 }
 
-data class InstalledApp(
-    val packageName: String,
-    val appLabel: String
-)
-
 data class AppResolutionResult(
     val status: AppResolutionStatus,
     val packageName: String? = null,
@@ -157,22 +152,5 @@ class AppResolver(
         } catch (e: Exception) {
             null
         }
-    }
-
-    fun getInstalledLauncherApps(): List<InstalledApp> {
-        val pm = context.packageManager
-        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-        val resolveInfos = try {
-            pm.queryIntentActivities(mainIntent, 0) ?: emptyList()
-        } catch (e: Exception) {
-            emptyList()
-        }
-        return resolveInfos.mapNotNull { info ->
-            val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
-            val label = try { info.loadLabel(pm).toString() } catch (e: Exception) { pkg }
-            InstalledApp(pkg, label)
-        }.distinctBy { it.packageName }.sortedBy { it.appLabel }
     }
 }

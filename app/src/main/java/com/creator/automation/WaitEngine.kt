@@ -3,16 +3,6 @@ package com.creator.automation
 import android.util.Log
 import kotlinx.coroutines.delay
 
-enum class TimeoutSource {
-    TARGET_RESOLUTION,
-    ACTION_DISPATCH,
-    WAIT_CONDITION,
-    OBSERVATION,
-    VERIFICATION,
-    RECOVERY,
-    RUNTIME
-}
-
 class WaitEngine(
     private val actionResolver: ActionResolver = ActionResolver()
 ) {
@@ -32,6 +22,20 @@ class WaitEngine(
         val pollInterval = maxOf(100L, condition.pollIntervalMs)
 
         Log.i(TAG, "WAIT_STARTED: ConditionType=${condition.type}, Expected='${condition.expectedValue}', Timeout=${timeoutMs}ms")
+
+        // Reject invalid wait conditions immediately
+        if ((condition.type == WaitConditionType.WAIT_FOR_PACKAGE ||
+             condition.type == WaitConditionType.WAIT_FOR_TEXT ||
+             condition.type == WaitConditionType.WAIT_FOR_VIEW_ID ||
+             condition.type == WaitConditionType.WAIT_FOR_STATE_SIGNATURE) &&
+            condition.expectedValue.isNullOrBlank()) {
+            Log.e(TAG, "WAIT_REJECTED: ${condition.type} condition created with null or blank expected value.")
+            return WaitResult(
+                success = false,
+                durationMs = 0L,
+                failureReason = "INVALID_WAIT_CONDITION: ${condition.type} expected value cannot be null or blank"
+            )
+        }
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             val root = service?.getRootNode()
@@ -109,18 +113,11 @@ class WaitEngine(
         }
 
         val duration = System.currentTimeMillis() - startTime
-        val timeoutSource = when (condition.type) {
-            WaitConditionType.WAIT_FOR_PACKAGE -> TimeoutSource.OBSERVATION
-            WaitConditionType.WAIT_FOR_TEXT, WaitConditionType.WAIT_FOR_VIEW_ID -> TimeoutSource.TARGET_RESOLUTION
-            WaitConditionType.WAIT_FOR_STATE_CHANGE, WaitConditionType.WAIT_FOR_VISUAL_CHANGE -> TimeoutSource.VERIFICATION
-            else -> TimeoutSource.WAIT_CONDITION
-        }
-
-        Log.w(TAG, "WAIT_TIMEOUT [Source=$timeoutSource]: Condition '${condition.type}' not met after ${duration}ms")
+        Log.w(TAG, "WAIT_TIMEOUT: Condition '${condition.type}' not met after ${duration}ms")
         return WaitResult(
             success = false,
             durationMs = duration,
-            failureReason = "Timeout waiting for ${condition.type} ('${condition.expectedValue}') [Source=$timeoutSource]"
+            failureReason = "Timeout waiting for ${condition.type} ('${condition.expectedValue}')"
         )
     }
 }

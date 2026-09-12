@@ -49,30 +49,11 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
-    private var overlayController: AgentOverlayController? = null
-    private var hideOverlayJob: kotlinx.coroutines.Job? = null
-
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceEnabled.value = true
-        overlayController = AgentOverlayController(this)
-
-        // Observe AutomationOverlayState updates to drive floating accessibility overlay on Main thread without blocking collect
-        serviceScope.launch(Dispatchers.Main) {
-            AutomationOverlayState.currentState.collect { state ->
-                hideOverlayJob?.cancel()
-                overlayController?.updateOverlayState(state)
-                if (state.actionState == VisualizationActionState.SUCCESS || state.actionState == VisualizationActionState.FAILED) {
-                    hideOverlayJob = serviceScope.launch(Dispatchers.Main) {
-                        kotlinx.coroutines.delay(2000L)
-                        overlayController?.hideOverlay()
-                    }
-                }
-            }
-        }
-
-        Log.i(TAG, "AutomationAccessibilityService connected and AgentOverlayController initialized")
+        Log.i(TAG, "AutomationAccessibilityService connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

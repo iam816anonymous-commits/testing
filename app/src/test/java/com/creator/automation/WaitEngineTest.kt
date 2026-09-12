@@ -1,88 +1,72 @@
 package com.creator.automation
 
+import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.mockito.Mockito
 
 class WaitEngineTest {
 
+    private lateinit var mockService: AutomationAccessibilityService
     private lateinit var waitEngine: WaitEngine
 
     @Before
     fun setUp() {
+        mockService = Mockito.mock(AutomationAccessibilityService::class.java)
         waitEngine = WaitEngine()
     }
 
     @Test
-    fun testWaitForTextConditionMet() = runBlocking {
-        val condition = WaitCondition(
-            type = WaitConditionType.WAIT_FOR_TEXT,
-            expectedValue = "Dashboard",
-            timeoutMs = 1000L,
-            pollIntervalMs = 100L
+    fun testWaitEngine_RejectsEmptyPackageWaitImmediately() = runBlocking {
+        val emptyPackageCondition = WaitCondition(
+            type = WaitConditionType.WAIT_FOR_PACKAGE,
+            expectedValue = "",
+            timeoutMs = 10000L
         )
 
-        // Null service scenario yields timeout cleanly
-        val result = waitEngine.waitUntil(
-            condition = condition,
-            service = null
-        )
+        val result = waitEngine.waitUntil(emptyPackageCondition, mockService)
 
-        assertFalse(result.success)
-        assertTrue(result.durationMs <= 1500L)
-        assertNotNull(result.failureReason)
+        assertFalse("Blank WAIT_FOR_PACKAGE must be rejected immediately", result.success)
+        assertEquals(0L, result.durationMs)
+        assertTrue(result.failureReason!!.contains("INVALID_WAIT_CONDITION"))
     }
 
     @Test
-    fun testSameScreenProgressConditionType() {
-        val condition = WaitCondition(
-            type = WaitConditionType.EXPECTED_SAME_SCREEN_PROGRESS,
-            expectedValue = "com.example.app",
-            timeoutMs = 500L
-        )
-
-        assertEquals(WaitConditionType.EXPECTED_SAME_SCREEN_PROGRESS, condition.type)
-        assertEquals(500L, condition.timeoutMs)
-    }
-
-    @Test
-    fun testNodeDisappearsConditionType() {
-        val condition = WaitCondition(
-            type = WaitConditionType.NODE_DISAPPEARS,
-            expectedValue = "Loading...",
+    fun testWaitEngine_SatisfiesValidPackageWait() = runBlocking {
+        val validCondition = WaitCondition(
+            type = WaitConditionType.WAIT_FOR_PACKAGE,
+            expectedValue = "com.google.android.youtube",
             timeoutMs = 2000L
         )
 
-        assertEquals(WaitConditionType.NODE_DISAPPEARS, condition.type)
-        assertEquals("Loading...", condition.expectedValue)
+        val mockNode = Mockito.mock(AccessibilityNodeInfo::class.java)
+        Mockito.`when`(mockService.getRootNode()).thenReturn(mockNode)
+        Mockito.`when`(mockNode.packageName).thenReturn("com.google.android.youtube")
+        Mockito.`when`(mockService.packageName).thenReturn("com.google.android.youtube")
+
+        val result = waitEngine.waitUntil(validCondition, mockService)
+
+        assertTrue("Valid package match should satisfy wait condition", result.success)
+        assertEquals("com.google.android.youtube", result.matchedValue)
     }
 
     @Test
-    fun testTargetBecomesEnabledConditionType() {
-        val condition = WaitCondition(
-            type = WaitConditionType.TARGET_BECOMES_ENABLED,
-            expectedValue = "SubmitButton",
-            timeoutMs = 1500L
-        )
+    fun testTaskResolver_PureTypingTaskGeneratesInputWorkflowWithoutPackageWait() = runBlocking {
+        val mockDao = Mockito.mock(LearnedWorkflowDao::class.java)
+        val resolver = TaskResolver(learnedWorkflowDao = mockDao)
 
-        assertEquals(WaitConditionType.TARGET_BECOMES_ENABLED, condition.type)
-    }
+        val res = resolver.resolveTask("Type hello world")
 
-    @Test
-    fun testStateChangeConditionFailureWithNullSignatures() = runBlocking {
-        val condition = WaitCondition(
-            type = WaitConditionType.WAIT_FOR_STATE_CHANGE,
-            timeoutMs = 300L,
-            pollIntervalMs = 50L
-        )
-
-        val res = waitEngine.waitUntil(
-            condition = condition,
-            service = null,
-            initialSignature = null
-        )
-
-        assertFalse(res.success)
+        assertEquals(TaskSource.LOCAL_RULE, res.source)
+        val steps = res.localWorkflow?.steps ?: emptyList()
+        assertTrue(steps.isNotEmpty())
+        assertEquals(ActionType.TYPE_TEXT, steps.first().action.type)
+        assertEquals("hello world", steps.first().action.inputData)
+        // Verify no WAIT_FOR_PACKAGE condition exists in typing task
+        assertTrue(steps.none { it.action.waitCondition?.type == WaitConditionType.WAIT_FOR_PACKAGE })
     }
 }

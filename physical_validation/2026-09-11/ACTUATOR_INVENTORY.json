@@ -1,0 +1,73 @@
+[
+  {
+    "name": "Haptic Vibrator",
+    "category": "Haptics",
+    "isPresent": true,
+    "isObservable": false,
+    "isControllable": true,
+    "isVerifiable": false,
+    "permissionRequired": "android.permission.VIBRATE",
+    "isCurrentlyAllowed": false,
+    "availabilityState": "USABLE",
+    "details": {
+      "hasVibrator": "true"
+    }
+  },
+  {
+    "name": "Camera Flash Torch",
+    "category": "Light\/Actuator",
+    "isPresent": false,
+    "isObservable": true,
+    "isControllable": false,
+    "isVerifiable": true,
+    "permissionRequired": "android.permission.CAMERA",
+    "isCurrentlyAllowed": false,
+    "availabilityState": "UNSUPPORTED",
+    "details": {
+      "cameraCount": "0",
+      "hasFlash": "false"
+    }
+  },
+  {
+    "name": "Display Control",
+    "category": "Display",
+    "isPresent": true,
+    "isObservable": true,
+    "isControllable": true,
+    "isVerifiable": true,
+    "permissionRequired": "android.permission.WAKE_LOCK",
+    "isCurrentlyAllowed": false,
+    "availabilityState": "USABLE",
+    "details": {
+      "isInteractive": "true"
+    }
+  },
+  {
+    "name": "Audio Manager",
+    "category": "Audio",
+    "isPresent": true,
+    "isObservable": true,
+    "isControllable": true,
+    "isVerifiable": true,
+    "permissionRequired": null,
+    "isCurrentlyAllowed": true,
+    "availabilityState": "USABLE",
+    "details": {
+      "ringerMode": "2"
+    }
+  },
+  {
+    "name": "System Navigation Controls (Back\/Home\/Recents)",
+    "category": "System Input",
+    "isPresent": true,
+    "isObservable": true,
+    "isControllable": false,
+    "isVerifiable": true,
+    "permissionRequired": "android.permission.BIND_ACCESSIBILITY_SERVICE",
+    "isCurrentlyAllowed": false,
+    "availabilityState": "BLOCKED",
+    "details": {
+      "accessibilityActive": "false"
+    }
+  }
+]

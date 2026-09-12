@@ -31,6 +31,31 @@ class TaskDecisionEngine(
             )
         }
 
+        // 3. Permission-Required Planning Check
+        if (goal.requiredPermissions.isNotEmpty()) {
+            val scanner = DeviceCapabilityScanner(context)
+            val permissions = scanner.scanPermissions()
+            val blockedPerm = permissions.find { goal.requiredPermissions.contains(it.permission) && !it.isGranted }
+            if (blockedPerm != null) {
+                return ActionDecision(
+                    actionType = ActionType.END,
+                    reason = "PERMISSION_REQUIRED: Capability requires permission '${blockedPerm.permission.substringAfterLast('.')}'",
+                    confidence = 0.0,
+                    expectedOutcome = "Task paused for user permission authorization"
+                )
+            }
+        }
+
+        // 4. Constraint Enforcement Check
+        if (goal.constraints.contains("READ_ONLY") && goal.requestedActionType == ActionType.TYPE_TEXT) {
+            return ActionDecision(
+                actionType = ActionType.READ_VISIBLE_UI,
+                reason = "CONSTRAINT_PRESERVED: READ_ONLY constraint active; avoiding text modification",
+                confidence = 1.0,
+                expectedOutcome = "UI observed without mutation"
+            )
+        }
+
         // 3. Step A: App Launch check
         if (!goal.targetAppQuery.isNullOrBlank() && !worldState.packageName.contains(goal.targetAppQuery, ignoreCase = true)) {
             return ActionDecision(

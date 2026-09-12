@@ -1,0 +1,205 @@
+{
+  "manufacturer": "unknown",
+  "model": "robolectric",
+  "device": "robolectric",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "fingerprint": "robolectric",
+  "availableMemoryMb": 0,
+  "totalMemoryMb": 0,
+  "availableStorageMb": 0,
+  "totalStorageMb": 0,
+  "screenWidthPx": 320,
+  "screenHeightPx": 470,
+  "screenDensityDpi": 160,
+  "batteryLevel": -1,
+  "isBatteryCharging": false,
+  "isAccessibilityActive": false,
+  "isMediaProjectionAuthorized": false,
+  "sensors": [],
+  "actuators": [
+    {
+      "name": "Haptic Vibrator",
+      "category": "Haptics",
+      "isPresent": true,
+      "isObservable": false,
+      "isControllable": true,
+      "isVerifiable": false,
+      "permissionRequired": "android.permission.VIBRATE",
+      "isCurrentlyAllowed": false,
+      "availabilityState": "USABLE",
+      "details": {
+        "hasVibrator": "true"
+      }
+    },
+    {
+      "name": "Camera Flash Torch",
+      "category": "Light\/Actuator",
+      "isPresent": false,
+      "isObservable": true,
+      "isControllable": false,
+      "isVerifiable": true,
+      "permissionRequired": "android.permission.CAMERA",
+      "isCurrentlyAllowed": false,
+      "availabilityState": "UNSUPPORTED",
+      "details": {
+        "cameraCount": "0",
+        "hasFlash": "false"
+      }
+    },
+    {
+      "name": "Display Control",
+      "category": "Display",
+      "isPresent": true,
+      "isObservable": true,
+      "isControllable": true,
+      "isVerifiable": true,
+      "permissionRequired": "android.permission.WAKE_LOCK",
+      "isCurrentlyAllowed": false,
+      "availabilityState": "USABLE",
+      "details": {
+        "isInteractive": "true"
+      }
+    },
+    {
+      "name": "Audio Manager",
+      "category": "Audio",
+      "isPresent": true,
+      "isObservable": true,
+      "isControllable": true,
+      "isVerifiable": true,
+      "permissionRequired": null,
+      "isCurrentlyAllowed": true,
+      "availabilityState": "USABLE",
+      "details": {
+        "ringerMode": "2"
+      }
+    },
+    {
+      "name": "System Navigation Controls (Back\/Home\/Recents)",
+      "category": "System Input",
+      "isPresent": true,
+      "isObservable": true,
+      "isControllable": false,
+      "isVerifiable": true,
+      "permissionRequired": "android.permission.BIND_ACCESSIBILITY_SERVICE",
+      "isCurrentlyAllowed": false,
+      "availabilityState": "BLOCKED",
+      "details": {
+        "accessibilityActive": "false"
+      }
+    }
+  ],
+  "permissions": [
+    {
+      "permission": "android.permission.CAMERA",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": true,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.RECORD_AUDIO",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": true,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.VIBRATE",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": false,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.WAKE_LOCK",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": false,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.ACCESS_FINE_LOCATION",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": true,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.ACCESS_COARSE_LOCATION",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": true,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.WRITE_EXTERNAL_STORAGE",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": true,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.READ_EXTERNAL_STORAGE",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": true,
+      "isUsable": false
+    },
+    {
+      "permission": "android.permission.INTERNET",
+      "isDeclared": false,
+      "isGranted": false,
+      "isRequired": true,
+      "isRuntimeApplicable": false,
+      "isUsable": false
+    }
+  ],
+  "capabilities": [
+    {
+      "name": "ACCESSIBILITY_AUTOMATION",
+      "hardwareState": "PRESENT",
+      "permissionState": "BLOCKED",
+      "operationState": "BLOCKED",
+      "verificationState": "BLOCKED",
+      "isUserEnabled": true,
+      "isUsable": false
+    },
+    {
+      "name": "CAMERA_VISION",
+      "hardwareState": "UNSUPPORTED",
+      "permissionState": "BLOCKED",
+      "operationState": "BLOCKED",
+      "verificationState": "USABLE",
+      "isUserEnabled": false,
+      "isUsable": false
+    },
+    {
+      "name": "HAPTIC_FEEDBACK",
+      "hardwareState": "PRESENT",
+      "permissionState": "BLOCKED",
+      "operationState": "BLOCKED",
+      "verificationState": "UNSUPPORTED",
+      "isUserEnabled": true,
+      "isUsable": false
+    },
+    {
+      "name": "GYROSCOPE_MOTION",
+      "hardwareState": "UNSUPPORTED",
+      "permissionState": "PERMISSION_GRANTED",
+      "operationState": "UNSUPPORTED",
+      "verificationState": "UNSUPPORTED",
+      "isUserEnabled": true,
+      "isUsable": false
+    }
+  ]
+}

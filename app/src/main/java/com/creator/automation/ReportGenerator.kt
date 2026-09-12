@@ -11,11 +11,7 @@ class ReportGenerator(private val context: Context) {
         deviceProfile: DeviceProfile,
         testResults: List<TestResult>
     ): Map<String, File> {
-        val dateFolder = "2026-09-12"
-        val outputDir = File(File(context.getExternalFilesDir(null), "physical_validation"), dateFolder).apply {
-            if (!exists()) mkdirs()
-        }
-        val rawLogsDir = File(outputDir, "RAW_LOGS").apply {
+        val outputDir = File(context.getExternalFilesDir(null), "physical_validation").apply {
             if (!exists()) mkdirs()
         }
 
@@ -43,16 +39,11 @@ class ReportGenerator(private val context: Context) {
         actuatorInventoryFile.writeText(actuatorArray.toString(2))
         generatedFiles["ACTUATOR_INVENTORY.json"] = actuatorInventoryFile
 
-        // 5. TEST_RESULTS.json & RAW_LOGS export
+        // 5. TEST_RESULTS.json
         val testResultsFile = File(outputDir, "TEST_RESULTS.json")
         val testResultsArray = JSONArray(testResults.map { it.toJson() })
         testResultsFile.writeText(testResultsArray.toString(2))
         generatedFiles["TEST_RESULTS.json"] = testResultsFile
-
-        testResults.forEach { res ->
-            val rawFile = File(rawLogsDir, "${res.testId}.json")
-            rawFile.writeText(res.toJson().toString(2))
-        }
 
         // 6. TEST_REPORT.md
         val testReportMdFile = File(outputDir, "TEST_REPORT.md")

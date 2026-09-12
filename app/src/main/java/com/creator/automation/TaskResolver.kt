@@ -32,40 +32,6 @@ class TaskResolver(
         val taskRecord = TaskRecord(description = taskDescription)
         val descLower = taskDescription.trim().lowercase()
 
-        // 0. Check for Hardware Actuator match
-        val actuatorMatch = HardwareActuatorRegistry.findActuatorForGoal(taskDescription)
-        if (actuatorMatch != null) {
-            val steps = listOf(
-                WorkflowStep(
-                    id = "step_1",
-                    action = AutomationAction(
-                        type = ActionType.TOGGLE_HARDWARE,
-                        targetValue = taskDescription,
-                        inputData = taskDescription,
-                        semantics = ActionSemantics.REPEATABLE
-                    )
-                )
-            )
-            val hwWorkflow = Workflow(
-                id = "hardware_wf_${System.currentTimeMillis()}",
-                name = "Hardware Control Workflow: $taskDescription",
-                steps = steps,
-                timeoutMs = 10000L
-            )
-            Log.i(TAG, "TASK_RESOLVED: HARDWARE_ACTUATOR_MATCH -> '${actuatorMatch.name}'")
-            return TaskResolution(
-                taskRecord = taskRecord.copy(
-                    status = TaskStatus.EXECUTING.name,
-                    source = TaskSource.LOCAL_RULE.name,
-                    resolutionReason = ResolutionReason.LOCAL_WORKFLOW_MATCH.name,
-                    totalSteps = 1
-                ),
-                source = TaskSource.LOCAL_RULE,
-                resolutionReason = ResolutionReason.LOCAL_WORKFLOW_MATCH,
-                localWorkflow = hwWorkflow
-            )
-        }
-
         // 1. Check for matching LearnedWorkflow
         if (currentSnapshot != null) {
             val stateSig = StateSignatureGenerator.generateSignature(currentSnapshot)
@@ -167,7 +133,86 @@ class TaskResolver(
     fun generateGenericWorkflowForTask(taskDescription: String): Workflow? {
         val descLower = taskDescription.trim().lowercase()
 
-        // Extract app name query (e.g. "open chrome and search...", "launch whatsapp", "open youtube")
+        // 1. Direct System Navigation Commands (GO_HOME, GO_BACK, PRESS_RECENTS)
+        if (descLower == "go home" || descLower == "press home" || descLower == "home" || descLower == "navigate home") {
+            return Workflow(
+                id = "system_home_${System.currentTimeMillis()}",
+                name = "System Home Navigation",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.PRESS_HOME, semantics = ActionSemantics.REPEATABLE)
+                    )
+                )
+            )
+        }
+
+        if (descLower == "go back" || descLower == "press back" || descLower == "back" || descLower == "navigate back") {
+            return Workflow(
+                id = "system_back_${System.currentTimeMillis()}",
+                name = "System Back Navigation",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.GO_BACK, semantics = ActionSemantics.REPEATABLE)
+                    )
+                )
+            )
+        }
+
+        if (descLower == "recents" || descLower == "open recents" || descLower == "press recents" || descLower == "app switcher") {
+            return Workflow(
+                id = "system_recents_${System.currentTimeMillis()}",
+                name = "System Recents Navigation",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.PRESS_RECENTS, semantics = ActionSemantics.REPEATABLE)
+                    )
+                )
+            )
+        }
+
+        if (descLower.contains("read") && (descLower.contains("screen") || descLower.contains("ui"))) {
+            return Workflow(
+                id = "system_read_screen_${System.currentTimeMillis()}",
+                name = "Read Screen Perception",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(type = ActionType.READ_VISIBLE_UI, semantics = ActionSemantics.READ_ONLY)
+                    )
+                )
+            )
+        }
+
+        // 2. Direct Pure Typing Task ("type hello", "enter text john")
+        if (descLower.startsWith("type ") || descLower.startsWith("enter text ")) {
+            val textToInput = taskDescription.substring(taskDescription.indexOf(" ") + 1).trim()
+            return Workflow(
+                id = "type_only_${System.currentTimeMillis()}",
+                name = "Pure Text Input Task",
+                steps = listOf(
+                    WorkflowStep(
+                        id = "step_1",
+                        action = AutomationAction(
+                            type = ActionType.TYPE_TEXT,
+                            inputData = textToInput,
+                            semantics = ActionSemantics.REPEATABLE
+                        )
+                    ),
+                    WorkflowStep(
+                        id = "step_2",
+                        action = AutomationAction(
+                            type = ActionType.READ_VISIBLE_UI,
+                            semantics = ActionSemantics.READ_ONLY
+                        )
+                    )
+                )
+            )
+        }
+
+        // 3. Extract app name query (e.g. "open chrome and search...", "launch whatsapp", "open youtube", "open settings")
         var targetAppName: String? = null
         if (descLower.startsWith("open ") || descLower.startsWith("launch ")) {
             val afterVerb = taskDescription.substring(descLower.indexOf(" ") + 1).trim()
@@ -177,6 +222,8 @@ class TaskResolver(
             } else if (words.isNotEmpty()) {
                 words[0]
             } else null
+        } else if (descLower == "settings") {
+            targetAppName = "settings"
         }
 
         if (targetAppName.isNullOrBlank()) return null
@@ -188,6 +235,19 @@ class TaskResolver(
         val steps = mutableListOf<WorkflowStep>()
         var stepIdCounter = 1
 
+        val launchWait = if (!targetPackage.isNullOrBlank()) {
+            WaitCondition(
+                type = WaitConditionType.WAIT_FOR_PACKAGE,
+                expectedValue = targetPackage,
+                timeoutMs = 10000L
+            )
+        } else {
+            WaitCondition(
+                type = WaitConditionType.WAIT_FOR_STATE_CHANGE,
+                timeoutMs = 10000L
+            )
+        }
+
         // Step 1: LAUNCH_APP
         steps.add(
             WorkflowStep(
@@ -197,11 +257,7 @@ class TaskResolver(
                     targetValue = targetAppName,
                     timeoutMs = 10000L,
                     semantics = ActionSemantics.REPEATABLE,
-                    waitCondition = WaitCondition(
-                        type = WaitConditionType.WAIT_FOR_PACKAGE,
-                        expectedValue = targetPackage ?: "",
-                        timeoutMs = 10000L
-                    )
+                    waitCondition = launchWait
                 )
             )
         )
@@ -218,14 +274,6 @@ class TaskResolver(
         }
 
         if (!searchQuery.isNullOrBlank()) {
-            // Clean filler prefixes from searchQuery
-            val cleanQuery = searchQuery
-                .removePrefix("for ")
-                .removePrefix("about ")
-                .removePrefix("on ")
-                .removePrefix("in ")
-                .trim()
-
             // Step 2a: TYPE_TEXT
             steps.add(
                 WorkflowStep(
@@ -233,20 +281,19 @@ class TaskResolver(
                     action = AutomationAction(
                         type = ActionType.TYPE_TEXT,
                         targetValue = "Search",
-                        inputData = cleanQuery,
+                        inputData = searchQuery,
                         timeoutMs = 5000L,
                         semantics = ActionSemantics.REPEATABLE
                     )
                 )
             )
 
-            // Step 2b: SUBMIT_INPUT (uses 3-tier generic submit pipeline)
+            // Step 2b: SUBMIT_INPUT
             steps.add(
                 WorkflowStep(
                     id = "step_${stepIdCounter++}",
                     action = AutomationAction(
                         type = ActionType.SUBMIT_INPUT,
-                        targetValue = cleanQuery,
                         timeoutMs = 5000L,
                         semantics = ActionSemantics.REPEATABLE,
                         waitCondition = WaitCondition(
