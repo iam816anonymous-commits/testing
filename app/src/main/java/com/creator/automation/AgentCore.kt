@@ -73,8 +73,12 @@ class AgentCore(
         trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
         globalAutonomousEnabled: Boolean = true
     ): AgentStepResult {
+        val traces = mutableListOf<ExecutionTrace>()
+        traces.add(ExecutionTrace(ExecutionStage.ACTION_CREATED, details = "Task created: '$taskDescription'"))
+
         if (_agentState.value == AgentState.CANCELLED) {
             logAgentActivity("AGENT_CANCELLED: Execution aborted by user cancellation")
+            traces.add(ExecutionTrace(ExecutionStage.TASK_CANCELLED, details = "Task cancelled by user"))
             return AgentStepResult(
                 stateBefore = AgentState.CANCELLED,
                 observation = null,
@@ -82,7 +86,8 @@ class AgentCore(
                 actionExecuted = null,
                 actionResult = null,
                 verificationStatus = VerificationStatus.FAILED,
-                nextState = AgentState.CANCELLED
+                nextState = AgentState.CANCELLED,
+                traces = traces
             )
         }
 
@@ -95,7 +100,8 @@ class AgentCore(
                 actionExecuted = null,
                 actionResult = null,
                 verificationStatus = VerificationStatus.FAILED,
-                nextState = AgentState.PAUSED
+                nextState = AgentState.PAUSED,
+                traces = traces
             )
         }
 
@@ -103,6 +109,7 @@ class AgentCore(
         _agentState.value = AgentState.OBSERVING
         AutomationOverlayState.updateState(VisualizationActionState.OBSERVING)
         logAgentActivity("AGENT_OBSERVING: Capturing current device observation (Primary: Accessibility)")
+        traces.add(ExecutionTrace(ExecutionStage.OBSERVATION_STARTED, details = "Capturing primary Accessibility observation"))
         var primaryObservation = observationProvider.captureObservation()
 
         var screenObservation: CurrentObservation? = null
@@ -132,6 +139,8 @@ class AgentCore(
             }
         }
 
+        traces.add(ExecutionTrace(ExecutionStage.OBSERVATION_COMPLETED, packageName = primaryObservation.packageName, details = "Captured ${primaryObservation.snapshot?.totalNodeCount ?: 0} nodes"))
+
         // Build ApplicationWorldState, ActionGraph & Generic App Interaction Discovery
         val snap = primaryObservation.snapshot
         if (snap != null) {
@@ -149,21 +158,25 @@ class AgentCore(
 
         if (_agentState.value == AgentState.CANCELLED) {
             logAgentActivity("AGENT_CANCELLED: Aborting execution prior to resolving step")
-            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, null, VerificationStatus.FAILED, AgentState.CANCELLED)
+            traces.add(ExecutionTrace(ExecutionStage.TASK_CANCELLED, details = "Task cancelled prior to target resolution"))
+            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, null, VerificationStatus.FAILED, AgentState.CANCELLED, traces)
         }
 
         // 2. RESOLVING & PLANNING & EXECUTING (One bounded cycle)
         _agentState.value = AgentState.RESOLVING
         AutomationOverlayState.updateState(VisualizationActionState.TARGET_FOUND, targetText = taskDescription, packageName = primaryObservation.packageName)
         logAgentActivity("AGENT_RESOLVING: Resolving task '$taskDescription' against state ${primaryObservation.stateSignature}")
+        traces.add(ExecutionTrace(ExecutionStage.TARGET_RESOLVED, packageName = primaryObservation.packageName, details = "Task resolved for '$taskDescription'"))
 
         if (_agentState.value == AgentState.CANCELLED) {
             logAgentActivity("AGENT_CANCELLED: Aborting execution prior to action dispatch")
-            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, null, VerificationStatus.FAILED, AgentState.CANCELLED)
+            traces.add(ExecutionTrace(ExecutionStage.TASK_CANCELLED, details = "Task cancelled prior to action dispatch"))
+            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, null, VerificationStatus.FAILED, AgentState.CANCELLED, traces)
         }
 
         _agentState.value = AgentState.EXECUTING
         logAgentActivity("AGENT_EXECUTING: Executing next step for task '$taskDescription'")
+        traces.add(ExecutionTrace(ExecutionStage.ACTION_DISPATCH_STARTED, packageName = primaryObservation.packageName, details = "Dispatching action for task '$taskDescription'"))
 
         val result = workflowEngine.resolveAndExecuteTask(
             taskDescription = taskDescription,
@@ -171,9 +184,16 @@ class AgentCore(
             globalAutonomousEnabled = globalAutonomousEnabled
         )
 
+        if (result.status == ActionResultStatus.SUCCESS) {
+            traces.add(ExecutionTrace(ExecutionStage.ACTION_DISPATCH_SUCCEEDED, packageName = primaryObservation.packageName, details = result.message ?: "Action dispatched successfully"))
+        } else {
+            traces.add(ExecutionTrace(ExecutionStage.ACTION_DISPATCH_FAILED, packageName = primaryObservation.packageName, details = result.message ?: "Action dispatch failed"))
+        }
+
         if (_agentState.value == AgentState.CANCELLED) {
             logAgentActivity("AGENT_CANCELLED: Aborting step verification following user cancellation")
-            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, result, VerificationStatus.FAILED, AgentState.CANCELLED)
+            traces.add(ExecutionTrace(ExecutionStage.TASK_CANCELLED, details = "Task cancelled during execution"))
+            return AgentStepResult(AgentState.CANCELLED, primaryObservation, "Cancelled by user", null, result, VerificationStatus.FAILED, AgentState.CANCELLED, traces)
         }
 
         // 3. VERIFYING (Observe after action - Semantic + Visual Screen + Camera verification)
@@ -203,6 +223,12 @@ class AgentCore(
             VerificationStatus.SUCCESSFULLY_VERIFIED
         } else {
             VerificationStatus.FAILED
+        }
+
+        if (verificationStatus == VerificationStatus.SUCCESSFULLY_VERIFIED) {
+            traces.add(ExecutionTrace(ExecutionStage.GOAL_VERIFIED, packageName = primaryObservation.packageName, details = "Goal verified on post-observation"))
+        } else {
+            traces.add(ExecutionTrace(ExecutionStage.GOAL_NOT_VERIFIED, packageName = primaryObservation.packageName, details = "Goal unverified on post-observation"))
         }
 
         // Record Transition Observation
@@ -250,25 +276,37 @@ class AgentCore(
         logAgentActivity("AGENT_LEARNING: Recording step metrics and memory updates")
 
         val nextState = when {
-            result.status == ActionResultStatus.SUCCESS -> {
+            result.status == ActionResultStatus.SUCCESS && verificationStatus == VerificationStatus.SUCCESSFULLY_VERIFIED -> {
                 logAgentActivity("AGENT_COMPLETED: Step completed successfully")
                 AutomationOverlayState.updateState(VisualizationActionState.SUCCESS, targetText = taskDescription, packageName = primaryObservation.packageName)
+                traces.add(ExecutionTrace(ExecutionStage.TASK_COMPLETED, packageName = primaryObservation.packageName, details = "Task step completed successfully"))
                 AgentState.COMPLETED
             }
             result.status == ActionResultStatus.BLOCKED -> {
                 logAgentActivity("AGENT_PAUSED: Execution blocked (${result.reason})")
                 AutomationOverlayState.updateState(VisualizationActionState.FAILED, targetText = taskDescription, packageName = primaryObservation.packageName)
+                traces.add(ExecutionTrace(ExecutionStage.TASK_FAILED, packageName = primaryObservation.packageName, details = "Execution blocked: ${result.reason}"))
                 AgentState.PAUSED
             }
             else -> {
                 _agentState.value = AgentState.RECOVERING
                 AutomationOverlayState.updateState(VisualizationActionState.RECOVERING, targetText = taskDescription, packageName = primaryObservation.packageName)
+                traces.add(ExecutionTrace(ExecutionStage.RECOVERY_STARTED, packageName = primaryObservation.packageName, details = "Evaluating failure recovery"))
                 val recoveryOutcome = recoveryManager.evaluateRecovery(1, result, _currentTaskRecord.value)
                 logAgentActivity("AGENT_RECOVERING: Failure recovery outcome = $recoveryOutcome")
                 when (recoveryOutcome) {
-                    RecoveryOutcome.RETRY -> AgentState.EXECUTING
-                    RecoveryOutcome.PAUSE -> AgentState.PAUSED
-                    else -> AgentState.FAILED
+                    RecoveryOutcome.RETRY -> {
+                        traces.add(ExecutionTrace(ExecutionStage.RECOVERY_COMPLETED, details = "Recovery strategy = RETRY"))
+                        AgentState.EXECUTING
+                    }
+                    RecoveryOutcome.PAUSE -> {
+                        traces.add(ExecutionTrace(ExecutionStage.RECOVERY_FAILED, details = "Recovery strategy = PAUSE"))
+                        AgentState.PAUSED
+                    }
+                    else -> {
+                        traces.add(ExecutionTrace(ExecutionStage.TASK_FAILED, details = "Recovery strategy = FAIL"))
+                        AgentState.FAILED
+                    }
                 }
             }
         }
@@ -281,7 +319,8 @@ class AgentCore(
             actionExecuted = null,
             actionResult = result,
             verificationStatus = verificationStatus,
-            nextState = nextState
+            nextState = nextState,
+            traces = traces
         )
     }
 
