@@ -78,7 +78,21 @@ class DeviceActionExecutor(
 
         // 3. Dispatch Action via Generic Accessibility Engine
         val dispatchResult = when (action.type) {
-            ActionType.LAUNCH_APP -> performLaunchApp(action.targetValue)
+            ActionType.LAUNCH_APP -> {
+                val launchRes = performLaunchApp(action.targetValue)
+                if (launchRes.status == ActionResultStatus.SUCCESS && action.targetValue != null) {
+                    val appRes = appResolver.resolveApplication(action.targetValue)
+                    if (appRes.packageName != null && action.waitCondition?.type == WaitConditionType.WAIT_FOR_PACKAGE) {
+                        Log.i(TAG, "LAUNCH_APP_DYNAMIC_PACKAGE_PROPAGATION: Propagating resolved package '${appRes.packageName}' to waitCondition")
+                        val updatedWait = action.waitCondition.copy(expectedValue = appRes.packageName)
+                        val waitRes = waitEngine.waitUntil(updatedWait, service, screenObservationProvider, beforeStateSig)
+                        if (!waitRes.success) {
+                            return launchRes.copy(status = ActionResultStatus.TIMEOUT, reason = ExecutionReason.TIMEOUT, message = waitRes.failureReason)
+                        }
+                    }
+                }
+                launchRes
+            }
             ActionType.OPEN_URL -> performOpenUrl(action.targetValue)
             ActionType.CHECK_AUTH_STATE -> performAuthCheck(beforeSnapshot)
             ActionType.WAIT -> performWait(action.targetValue)
@@ -91,9 +105,9 @@ class DeviceActionExecutor(
             ActionType.SCROLL, ActionType.SCROLL_DOWN -> performScroll(service, beforeSnapshot, forward = true, beforeStateSig = beforeStateSig)
             ActionType.SCROLL_UP -> performScroll(service, beforeSnapshot, forward = false, beforeStateSig = beforeStateSig)
             ActionType.GO_BACK -> performGoBack(service)
-            ActionType.PRESS_HOME -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_HOME, "HOME")
-            ActionType.PRESS_RECENTS -> performGlobalAction(service, AccessibilityService.GLOBAL_ACTION_RECENTS, "RECENTS")
-            ActionType.CAPTURE_SCREEN -> performCaptureScreen(service, beforeSnapshot)
+            ActionType.PRESS_HOME -> performGlobalHome(service)
+            ActionType.PRESS_RECENTS -> performGlobalRecents(service)
+            ActionType.CAPTURE_SCREEN -> performCaptureScreen(service, screenObservationProvider)
             ActionType.READ_VISIBLE_UI, ActionType.REFRESH_OBSERVATION -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
             else -> ActionResult(status = ActionResultStatus.SUCCESS, snapshot = beforeSnapshot)
         }
@@ -469,55 +483,126 @@ class DeviceActionExecutor(
             return ActionResult(status = ActionResultStatus.FAILED, message = "TYPE_TEXT requires input text string")
         }
 
-        val res = actionResolver.resolveEditableTarget(snapshot, targetLabel)
-        if (res.match == null) {
+        val redactedText = redactSensitiveText(textToType)
+
+        // Stage 1: Observe & Resolve Editable Target on Fresh Window
+        val freshRoot = service.getRootNode()
+        var freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+
+        var res = actionResolver.resolveEditableTarget(freshSnapshot, targetLabel)
+        var match = res.match
+
+        // Generic Search Overlay Auto-Opening Fallback:
+        // If no editable field is open, check if target query resolves to a clickable non-editable control (e.g. Search icon/button).
+        if (match == null && !targetLabel.isNullOrBlank()) {
+            val nonEditableCandidate = actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetLabel)
+            if (nonEditableCandidate.match != null && !nonEditableCandidate.isAmbiguous) {
+                val searchBtnNode = nonEditableCandidate.match.node.nodeRef as? AccessibilityNodeInfo
+                if (searchBtnNode != null) {
+                    Log.i(TAG, "TYPE_TEXT_SEARCH_OVERLAY_FALLBACK: Found non-editable search control '${targetLabel}'. Clicking to open search overlay...")
+                    var targetBtn: AccessibilityNodeInfo? = searchBtnNode
+                    while (targetBtn != null && !targetBtn.isClickable) {
+                        targetBtn = targetBtn.parent
+                    }
+                    val clicked = targetBtn?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+                    if (clicked) {
+                        kotlinx.coroutines.delay(400L)
+                        val postClickRoot = service.getRootNode()
+                        freshSnapshot = ActionResolver.captureSnapshot(postClickRoot, service.packageName ?: "")
+                        res = actionResolver.resolveEditableTarget(freshSnapshot, null)
+                        match = res.match
+                    }
+                }
+            }
+        }
+
+        if (match == null) {
+            Log.w(TAG, "TYPE_TEXT_DIAGNOSTIC: Stage 1 failed. No editable field found in package '${freshSnapshot.packageName}' for query '$targetLabel'")
             return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "No editable field found for TYPE_TEXT")
         }
 
-        if (!res.match.node.isEnabled) {
+        val targetNodeInfo = match.node
+        if (!targetNodeInfo.isEnabled) {
+            Log.w(TAG, "TYPE_TEXT_DIAGNOSTIC: Stage 2 failed. Editable field is disabled.")
             return ActionResult(status = ActionResultStatus.BLOCKED, reason = ExecutionReason.PRECONDITION_FAILED, message = "Editable input field is disabled")
         }
 
-        val editableNode = res.match.node.nodeRef as? AccessibilityNodeInfo
+        val editableNode = targetNodeInfo.nodeRef as? AccessibilityNodeInfo
             ?: return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Editable node reference missing")
 
-        // 1. Focus node if focusable
+        // Stage 2: Focus & Click
+        var focusDispatched = false
         if (!editableNode.isFocused) {
-            editableNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            focusDispatched = editableNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
             editableNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            kotlinx.coroutines.delay(200L)
         }
 
-        // 2. Inject text using Android Accessibility API
+        // Stage 3: Inject Text via ACTION_SET_TEXT
         val arguments = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, textToType)
         }
 
-        val success = editableNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-        val redactedText = redactSensitiveText(textToType)
+        var success = editableNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
 
-        if (!success) {
-            Log.e(TAG, "TYPE_TEXT_FAILED: ACTION_SET_TEXT returned false")
-            return ActionResult(status = ActionResultStatus.FAILED, message = "Failed to inject text '$redactedText'")
-        }
-
-        // 3. Post-action verification: Re-observe and verify the editable node actually contains the typed text string
+        // Stage 4: Post-Injection Observation & Verification
         kotlinx.coroutines.delay(300L)
         val afterRoot = service.getRootNode()
         val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
-        val verifiedEditable = afterSnapshot.editableNodes.firstOrNull { it.text?.contains(textToType) == true }
 
-        val verificationStatusMessage = if (verifiedEditable != null) {
-            "VERIFIED_SUCCESS: Text '$redactedText' confirmed in editable view"
-        } else {
-            "DISPATCH_SUCCEEDED_UNVERIFIED: Text injection dispatched but text string unconfirmed in post-observation"
+        val normExpected = textToType.trim().lowercase()
+        val isVerified = afterSnapshot.editableNodes.any { node ->
+            val nodeText = node.text?.trim()?.lowercase() ?: ""
+            nodeText.contains(normExpected) || (redactedText == "[REDACTED]" && nodeText.isNotBlank())
+        } || afterSnapshot.allNodes.any { node ->
+            val nodeText = node.text?.trim()?.lowercase() ?: ""
+            nodeText.contains(normExpected)
         }
 
-        Log.i(TAG, "TYPE_TEXT_DIAGNOSTIC: $verificationStatusMessage")
+        // Stage 5: Retry Fallback if unverified
+        if (!success || !isVerified) {
+            Log.w(TAG, "TYPE_TEXT_RETRY: Initial injection unverified ($success, isVerified=$isVerified). Attempting focused editable retry.")
+            val reResolved = actionResolver.resolveEditableTarget(afterSnapshot, null)
+            val reEditable = reResolved.match?.node?.nodeRef as? AccessibilityNodeInfo
+            if (reEditable != null) {
+                reEditable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                success = reEditable.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+                kotlinx.coroutines.delay(300L)
+            }
+        }
+
+        val finalRoot = service.getRootNode()
+        val finalSnapshot = ActionResolver.captureSnapshot(finalRoot, service.packageName ?: "")
+        val finalVerified = finalSnapshot.editableNodes.any { node ->
+            val nodeText = node.text?.trim()?.lowercase() ?: ""
+            nodeText.contains(normExpected) || (redactedText == "[REDACTED]" && nodeText.isNotBlank())
+        }
+
+        val verificationStatusMessage = if (finalVerified) {
+            "VERIFIED_SUCCESS: Text '$redactedText' confirmed in editable target"
+        } else if (success) {
+            "DISPATCH_SUCCEEDED_UNVERIFIED: SET_TEXT returned true for '$redactedText' but text unconfirmed in post-observation"
+        } else {
+            "DISPATCH_FAILED: SET_TEXT failed for '$redactedText'"
+        }
+
+        Log.i(
+            TAG,
+            "TYPE_TEXT_DIAGNOSTIC:\n" +
+                    "  pkg=${freshSnapshot.packageName}\n" +
+                    "  targetLabel=${targetLabel ?: "focused"}\n" +
+                    "  redactedInput=$redactedText\n" +
+                    "  isFocused=${editableNode.isFocused}\n" +
+                    "  focusDispatched=$focusDispatched\n" +
+                    "  setTextSuccess=$success\n" +
+                    "  verified=$finalVerified\n" +
+                    "  outcome=$verificationStatusMessage"
+        )
 
         return ActionResult(
-            status = ActionResultStatus.SUCCESS,
-            matchedNode = res.match.node,
-            matchMethod = res.match.matchMethod,
+            status = if (success || finalVerified) ActionResultStatus.SUCCESS else ActionResultStatus.FAILED,
+            matchedNode = targetNodeInfo,
+            matchMethod = match.matchMethod,
             message = verificationStatusMessage
         )
     }
@@ -640,44 +725,89 @@ class DeviceActionExecutor(
     }
 
     private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String): ActionResult {
-        val scrollableNode = snapshot.scrollableNodes.firstOrNull()?.nodeRef as? AccessibilityNodeInfo
+        val freshRoot = service.getRootNode()
+        val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+
+        val scrollableInfo = freshSnapshot.scrollableNodes.firstOrNull()
+        val scrollableNode = scrollableInfo?.nodeRef as? AccessibilityNodeInfo
+
+        var dispatchAttempt = "ACCESSIBILITY_ACTION_SCROLL"
+        var scrollDispatched = false
+
+        // Tier 1 & 2: Accessibility Action Scroll
         if (scrollableNode != null) {
             val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-            if (scrollableNode.performAction(action)) {
-                // Post-scroll verification: Capture fresh snapshot to check for scroll progress
-                kotlinx.coroutines.delay(500L)
-                val afterRoot = service.getRootNode()
-                val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
-                val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
-
-                if (beforeStateSig == afterStateSig) {
-                    Log.w(TAG, "SCROLL_NO_PROGRESS: Scroll action produced no UI state change")
-                    return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.STUCK, message = "Scroll action produced no state change (NO_PROGRESS)")
-                }
-
-                return ActionResult(status = ActionResultStatus.SUCCESS)
-            }
+            scrollDispatched = scrollableNode.performAction(action)
         }
-        return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "No scrollable container found for scroll")
+
+        // Tier 3: Dynamic Gesture Swipe Fallback
+        if (!scrollDispatched) {
+            dispatchAttempt = "DYNAMIC_GESTURE_SWIPE_FALLBACK"
+            val displayMetrics = context.resources.displayMetrics
+            val screenWidth = displayMetrics.widthPixels.toFloat()
+            val screenHeight = displayMetrics.heightPixels.toFloat()
+
+            val startX = screenWidth / 2f
+            val (startY, endY) = if (forward) {
+                Pair(screenHeight * 0.75f, screenHeight * 0.25f) // Swipe UP to scroll DOWN
+            } else {
+                Pair(screenHeight * 0.25f, screenHeight * 0.75f) // Swipe DOWN to scroll UP
+            }
+
+            Log.i(TAG, "SCROLL_GESTURE_FALLBACK: Attempting gesture swipe ($startX, $startY) -> ($startX, $endY)")
+            scrollDispatched = AndroidAutomationCompat.dispatchSwipe(service, startX, startY, startX, endY)
+        }
+
+        if (!scrollDispatched) {
+            Log.w(TAG, "SCROLL_FAILED: Both accessibility scroll and gesture swipe fallback failed.")
+            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "No scrollable container or gesture dispatch path available")
+        }
+
+        // Post-Scroll Verification: Observe UI state change
+        kotlinx.coroutines.delay(500L)
+        val afterRoot = service.getRootNode()
+        val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+        val afterStateSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+        val visibleTextChanged = (freshSnapshot.visibleTexts.toSet() != afterSnapshot.visibleTexts.toSet())
+        val stateSigChanged = (beforeStateSig != afterStateSig)
+        val isVerified = stateSigChanged || visibleTextChanged
+
+        val verificationMessage = if (isVerified) {
+            "VERIFIED_SUCCESS: Scroll executed ($dispatchAttempt) and UI state changed"
+        } else {
+            "DISPATCH_SUCCEEDED_UNVERIFIED: Scroll dispatched ($dispatchAttempt) but no UI state change detected"
+        }
+
+        Log.i(TAG, "SCROLL_DIAGNOSTIC: $verificationMessage (stateSigChanged=$stateSigChanged, textChanged=$visibleTextChanged)")
+
+        return ActionResult(
+            status = if (isVerified) ActionResultStatus.SUCCESS else ActionResultStatus.FAILED,
+            reason = if (isVerified) ExecutionReason.NONE else ExecutionReason.STUCK,
+            message = verificationMessage
+        )
     }
 
     private fun performGoBack(service: AutomationAccessibilityService): ActionResult {
-        return if (service.performGoBack()) ActionResult(status = ActionResultStatus.SUCCESS)
+        return if (AndroidAutomationCompat.performGlobalBack(service)) ActionResult(status = ActionResultStatus.SUCCESS)
         else ActionResult(status = ActionResultStatus.FAILED, message = "GO_BACK failed")
     }
 
-    private fun performGlobalAction(service: AutomationAccessibilityService, actionId: Int, actionName: String): ActionResult {
-        return if (service.performGlobalAction(actionId)) ActionResult(status = ActionResultStatus.SUCCESS, message = "Global action $actionName executed")
-        else ActionResult(status = ActionResultStatus.FAILED, message = "Global action $actionName failed")
+    private fun performGlobalHome(service: AutomationAccessibilityService): ActionResult {
+        return if (AndroidAutomationCompat.performGlobalHome(service)) ActionResult(status = ActionResultStatus.SUCCESS, message = "Global action HOME executed")
+        else ActionResult(status = ActionResultStatus.FAILED, message = "Global action HOME failed")
     }
 
-    private suspend fun performCaptureScreen(service: AutomationAccessibilityService, snapshot: UiSnapshot): ActionResult {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
-            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UNSUPPORTED_ANDROID_VERSION, message = "Requires Android 11+")
-        }
-        val path = service.captureScreenshot()
-        return if (path != null) ActionResult(status = ActionResultStatus.SUCCESS, screenshotPath = path)
-        else ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.SCREENSHOT_FAILED, message = "Screenshot capture failed")
+    private fun performGlobalRecents(service: AutomationAccessibilityService): ActionResult {
+        return if (AndroidAutomationCompat.performGlobalRecents(service)) ActionResult(status = ActionResultStatus.SUCCESS, message = "Global action RECENTS executed")
+        else ActionResult(status = ActionResultStatus.FAILED, message = "Global action RECENTS failed")
+    }
+
+    private suspend fun performCaptureScreen(
+        service: AutomationAccessibilityService,
+        screenProvider: ObservationProvider?
+    ): ActionResult {
+        return AndroidAutomationCompat.captureScreenshotCompat(service, context, screenProvider)
     }
 }
 

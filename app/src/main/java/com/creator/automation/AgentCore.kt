@@ -40,30 +40,9 @@ class AgentCore(
         trigger: ExecutionTrigger = ExecutionTrigger.MANUAL,
         globalAutonomousEnabled: Boolean = true
     ): AgentStepResult {
-        if (_agentState.value == AgentState.CANCELLED) {
-            logAgentActivity("AGENT_CANCELLED: Execution aborted by user cancellation")
-            return AgentStepResult(
-                stateBefore = AgentState.CANCELLED,
-                observation = null,
-                decisionReason = "Agent task cancelled",
-                actionExecuted = null,
-                actionResult = null,
-                verificationStatus = VerificationStatus.FAILED,
-                nextState = AgentState.CANCELLED
-            )
-        }
-
-        if (_agentState.value == AgentState.PAUSED) {
-            logAgentActivity("AGENT_PAUSED: Execution halted due to pause state")
-            return AgentStepResult(
-                stateBefore = AgentState.PAUSED,
-                observation = null,
-                decisionReason = "Agent loop is currently PAUSED",
-                actionExecuted = null,
-                actionResult = null,
-                verificationStatus = VerificationStatus.FAILED,
-                nextState = AgentState.PAUSED
-            )
+        if (_agentState.value == AgentState.CANCELLED || _agentState.value == AgentState.PAUSED) {
+            logAgentActivity("AGENT_RESUMING: Resuming agent loop from ${_agentState.value.name} for task '$taskDescription'")
+            _agentState.value = AgentState.IDLE
         }
 
         // 1. OBSERVING (Observe before action - Multi-Source Hierarchy: Accessibility -> Screen -> Camera)
@@ -125,35 +104,42 @@ class AgentCore(
             visualVerificationDetails += ", cameraChange=${postCameraObs.visualChangeState}"
         }
 
-        val verificationStatus = if (result.status == ActionResultStatus.SUCCESS) {
+        val goalVerifier = GoalVerifier()
+        val goalEval = goalVerifier.verifyTaskGoal(taskDescription, postObs.snapshot, result)
+
+        val verificationStatus = if (goalEval.isVerified) {
             VerificationStatus.SUCCESSFULLY_VERIFIED
         } else {
             VerificationStatus.FAILED
         }
 
-        logAgentActivity("AGENT_VERIFYING: Post-action state = ${postObs.stateSignature}$visualVerificationDetails, Verification = $verificationStatus")
+        logAgentActivity("AGENT_VERIFYING: Goal verification = ${goalEval.status} (Verified: ${goalEval.isVerified}), Explanation: ${goalEval.explanation}")
 
         // 4. LEARNING & STATE EVALUATION
         _agentState.value = AgentState.LEARNING
         logAgentActivity("AGENT_LEARNING: Recording step metrics and memory updates")
 
-        val nextState = when {
-            result.status == ActionResultStatus.SUCCESS -> {
-                logAgentActivity("AGENT_COMPLETED: Step completed successfully")
-                AgentState.COMPLETED
+        val (nextState, finalGoalResult) = when {
+            goalEval.isVerified -> {
+                logAgentActivity("AGENT_COMPLETED: Task goal confirmed successfully")
+                Pair(AgentState.COMPLETED, GoalResult.CONFIRMED)
+            }
+            goalEval.status == GoalVerificationStatus.UNKNOWN -> {
+                logAgentActivity("AGENT_PAUSED: Verification unavailable on device hardware")
+                Pair(AgentState.PAUSED, GoalResult.VERIFICATION_UNAVAILABLE)
             }
             result.status == ActionResultStatus.BLOCKED -> {
                 logAgentActivity("AGENT_PAUSED: Execution blocked (${result.reason})")
-                AgentState.PAUSED
+                Pair(AgentState.PAUSED, GoalResult.NOT_CONFIRMED)
             }
             else -> {
                 _agentState.value = AgentState.RECOVERING
                 val recoveryOutcome = recoveryManager.evaluateRecovery(1, result, _currentTaskRecord.value)
                 logAgentActivity("AGENT_RECOVERING: Failure recovery outcome = $recoveryOutcome")
                 when (recoveryOutcome) {
-                    RecoveryOutcome.RETRY -> AgentState.EXECUTING
-                    RecoveryOutcome.PAUSE -> AgentState.PAUSED
-                    else -> AgentState.FAILED
+                    RecoveryOutcome.RETRY -> Pair(AgentState.EXECUTING, GoalResult.NOT_CONFIRMED)
+                    RecoveryOutcome.PAUSE -> Pair(AgentState.PAUSED, GoalResult.NOT_CONFIRMED)
+                    else -> Pair(AgentState.FAILED, GoalResult.FAILED)
                 }
             }
         }
@@ -161,11 +147,12 @@ class AgentCore(
         _agentState.value = nextState
         return AgentStepResult(
             stateBefore = AgentState.IDLE,
-            observation = primaryObservation,
-            decisionReason = result.message,
+            observation = postObs,
+            decisionReason = goalEval.explanation,
             actionExecuted = null,
             actionResult = result,
             verificationStatus = verificationStatus,
+            goalResult = finalGoalResult,
             nextState = nextState
         )
     }

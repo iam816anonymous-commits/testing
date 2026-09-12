@@ -16,6 +16,64 @@ enum class WorldStateFreshness {
  * - CACHED: Snapshot reference and previous signature (snapshot, previousStateSignature).
  * - STALE-PRONE: Temporal execution metadata (recentActionType, recentActionResult, recentFailureReason).
  */
+data class WorldStateDiff(
+    val beforeStateSignature: String,
+    val afterStateSignature: String,
+    val packageChanged: Boolean,
+    val beforePackage: String,
+    val afterPackage: String,
+    val newTextsAppeared: List<String>,
+    val textsDisappeared: List<String>,
+    val editableStateShifted: Boolean,
+    val focusShifted: Boolean,
+    val keyboardToggled: Boolean,
+    val dialogToggled: Boolean,
+    val isProgressObserved: Boolean,
+    val summary: String
+) {
+    companion object {
+        fun calculateDiff(before: WorldState, after: WorldState): WorldStateDiff {
+            val pkgChanged = before.packageName != after.packageName
+            val newTexts = after.visibleTexts.filter { !before.visibleTexts.contains(it) }
+            val removedTexts = before.visibleTexts.filter { !after.visibleTexts.contains(it) }
+            val editableShift = before.editableTargets.size != after.editableTargets.size ||
+                    before.focusedTarget?.text != after.focusedTarget?.text
+            val focusShift = before.focusedTarget?.text != after.focusedTarget?.text ||
+                    before.focusedTarget?.viewIdResourceName != after.focusedTarget?.viewIdResourceName
+            val kbToggled = before.isKeyboardVisible != after.isKeyboardVisible
+            val dialogToggled = before.hasDialogOrPopup != after.hasDialogOrPopup
+
+            val hasProgress = pkgChanged || newTexts.isNotEmpty() || editableShift || focusShift || kbToggled || dialogToggled
+
+            val summaryText = when {
+                pkgChanged -> "Application package changed: ${before.packageName} -> ${after.packageName}"
+                newTexts.isNotEmpty() -> "${newTexts.size} new UI text elements appeared (e.g. '${newTexts.first()}')"
+                editableShift -> "Editable input field state updated"
+                focusShift -> "Focused UI node shifted"
+                kbToggled -> "Keyboard visibility state changed (keyboardVisible=${after.isKeyboardVisible})"
+                dialogToggled -> "Dialog/Popup overlay toggled"
+                else -> "No observable UI state change (signatures identical)"
+            }
+
+            return WorldStateDiff(
+                beforeStateSignature = before.uiTreeSignature,
+                afterStateSignature = after.uiTreeSignature,
+                packageChanged = pkgChanged,
+                beforePackage = before.packageName,
+                afterPackage = after.packageName,
+                newTextsAppeared = newTexts,
+                textsDisappeared = removedTexts,
+                editableStateShifted = editableShift,
+                focusShifted = focusShift,
+                keyboardToggled = kbToggled,
+                dialogToggled = dialogToggled,
+                isProgressObserved = hasProgress,
+                summary = summaryText
+            )
+        }
+    }
+}
+
 data class WorldState(
     // AUTHORITATIVE FIELDS
     val packageName: String = "unknown",

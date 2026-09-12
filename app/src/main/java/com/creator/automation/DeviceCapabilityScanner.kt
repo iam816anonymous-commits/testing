@@ -119,7 +119,9 @@ data class CapabilityMapping(
     val hardwareState: PhysicalCapabilityState,
     val permissionState: PhysicalCapabilityState,
     val operationState: PhysicalCapabilityState,
-    val verificationState: PhysicalCapabilityState
+    val verificationState: PhysicalCapabilityState,
+    val isUserEnabled: Boolean = true,
+    val isUsable: Boolean = (hardwareState == PhysicalCapabilityState.PRESENT && permissionState == PhysicalCapabilityState.PERMISSION_GRANTED && operationState == PhysicalCapabilityState.USABLE && isUserEnabled)
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("name", name)
@@ -127,6 +129,8 @@ data class CapabilityMapping(
         put("permissionState", permissionState.name)
         put("operationState", operationState.name)
         put("verificationState", verificationState.name)
+        put("isUserEnabled", isUserEnabled)
+        put("isUsable", isUsable)
     }
 }
 
@@ -484,51 +488,59 @@ class DeviceCapabilityScanner(private val context: Context) {
 
         // Accessibility
         val isAcc = AutomationAccessibilityService.isServiceEnabled.value
+        val isAccUserEnabled = CapabilityPreferenceStore.isUserEnabled(context, "ACCESSIBILITY_AUTOMATION", true)
         mappings.add(
             CapabilityMapping(
                 name = "ACCESSIBILITY_AUTOMATION",
                 hardwareState = PhysicalCapabilityState.PRESENT,
                 permissionState = if (isAcc) PhysicalCapabilityState.PERMISSION_GRANTED else PhysicalCapabilityState.BLOCKED,
                 operationState = if (isAcc) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.BLOCKED,
-                verificationState = if (isAcc) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.BLOCKED
+                verificationState = if (isAcc) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.BLOCKED,
+                isUserEnabled = isAccUserEnabled
             )
         )
 
         // Camera
         val camActuator = actuators.find { it.name.contains("Torch") || it.category == "Light/Actuator" }
         val camPerm = permissions.find { it.permission == android.Manifest.permission.CAMERA }
+        val isCamUserEnabled = CapabilityPreferenceStore.isUserEnabled(context, "CAMERA_VISION", false)
         mappings.add(
             CapabilityMapping(
                 name = "CAMERA_VISION",
                 hardwareState = if (camActuator?.isPresent == true) PhysicalCapabilityState.PRESENT else PhysicalCapabilityState.UNSUPPORTED,
                 permissionState = if (camPerm?.isGranted == true) PhysicalCapabilityState.PERMISSION_GRANTED else PhysicalCapabilityState.BLOCKED,
                 operationState = if (camActuator?.isPresent == true && camPerm?.isGranted == true) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.BLOCKED,
-                verificationState = PhysicalCapabilityState.USABLE
+                verificationState = PhysicalCapabilityState.USABLE,
+                isUserEnabled = isCamUserEnabled
             )
         )
 
         // Vibrator
         val vibActuator = actuators.find { it.name.contains("Vibrator") }
         val vibPerm = permissions.find { it.permission == android.Manifest.permission.VIBRATE }
+        val isVibUserEnabled = CapabilityPreferenceStore.isUserEnabled(context, "HAPTIC_FEEDBACK", true)
         mappings.add(
             CapabilityMapping(
                 name = "HAPTIC_FEEDBACK",
                 hardwareState = if (vibActuator?.isPresent == true) PhysicalCapabilityState.PRESENT else PhysicalCapabilityState.UNSUPPORTED,
                 permissionState = if (vibPerm?.isGranted == true) PhysicalCapabilityState.PERMISSION_GRANTED else PhysicalCapabilityState.BLOCKED,
                 operationState = if (vibActuator?.isPresent == true && vibPerm?.isGranted == true) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.BLOCKED,
-                verificationState = PhysicalCapabilityState.UNSUPPORTED
+                verificationState = PhysicalCapabilityState.UNSUPPORTED,
+                isUserEnabled = isVibUserEnabled
             )
         )
 
         // Gyroscope / Motion
         val hasGyro = sensors.any { it.type == Sensor.TYPE_GYROSCOPE }
+        val isGyroUserEnabled = CapabilityPreferenceStore.isUserEnabled(context, "SENSORS", true)
         mappings.add(
             CapabilityMapping(
                 name = "GYROSCOPE_MOTION",
                 hardwareState = if (hasGyro) PhysicalCapabilityState.PRESENT else PhysicalCapabilityState.UNSUPPORTED,
                 permissionState = PhysicalCapabilityState.PERMISSION_GRANTED,
                 operationState = if (hasGyro) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.UNSUPPORTED,
-                verificationState = if (hasGyro) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.UNSUPPORTED
+                verificationState = if (hasGyro) PhysicalCapabilityState.USABLE else PhysicalCapabilityState.UNSUPPORTED,
+                isUserEnabled = isGyroUserEnabled
             )
         )
 

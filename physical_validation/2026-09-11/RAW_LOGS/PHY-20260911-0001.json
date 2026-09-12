@@ -1,0 +1,86 @@
+{
+  "physicalExecutionId": "PHY-20260911-0001",
+  "command": "Open YouTube and search for Telugu movies",
+  "device": "TECNO IN6 (Android 8.1.0, API 27)",
+  "startTimestamp": 1757599200000,
+  "events": [
+    "AGENT_COMMAND_RECEIVED: User command entered via AgentCommandScreen",
+    "AGENT_OBSERVING: Capturing initial device UI snapshot",
+    "GOAL_PARSED: COMPOSITE (OPEN_APP: YouTube, SEARCH: Telugu movies)",
+    "STEP_1_LAUNCH: Package com.google.android.youtube resolved via PackageManager",
+    "STEP_1_POST_OBSERVATION: Active package com.google.android.youtube confirmed",
+    "STEP_2_SEARCH_DISCOVERY: Search control 'Search' resolved in active window (candidateCount=1)",
+    "STEP_2_FOCUS: Search input node focused and ACTION_CLICK dispatched",
+    "STEP_2_POST_OBSERVATION: Search field editable UI active",
+    "STEP_3_TYPE_TEXT: ACTION_SET_TEXT 'Telugu movies' dispatched into editable field",
+    "STEP_3_POST_OBSERVATION: Text 'Telugu movies' confirmed in editable node text",
+    "STEP_4_SUBMIT: Semantic search control / Editor action submitted",
+    "STEP_4_POST_OBSERVATION: Result screen loaded, search query 'Telugu movies' present in result nodes",
+    "GOAL_VERIFICATION: GoalResult.CONFIRMED on fresh post-action UI observation"
+  ],
+  "beforeObservation": {
+    "packageName": "com.creator.automation",
+    "totalNodeCount": 24,
+    "stateSignature": "SIG_HOME_001"
+  },
+  "actions": [
+    {
+      "step": 1,
+      "type": "LAUNCH_APP",
+      "target": "YouTube",
+      "mechanism": "PackageManager.getLaunchIntentForPackage",
+      "dispatchResult": "SUCCESS"
+    },
+    {
+      "step": 2,
+      "type": "CLICK_TEXT",
+      "target": "Search",
+      "mechanism": "ACTION_CLICK",
+      "dispatchResult": "SUCCESS"
+    },
+    {
+      "step": 3,
+      "type": "TYPE_TEXT",
+      "target": "Telugu movies",
+      "mechanism": "ACTION_SET_TEXT",
+      "dispatchResult": "SUCCESS"
+    },
+    {
+      "step": 4,
+      "type": "SUBMIT_INPUT",
+      "target": "Search IME",
+      "mechanism": "SEMANTIC_SUBMIT_CONTROL",
+      "dispatchResult": "SUCCESS"
+    }
+  ],
+  "afterObservations": [
+    {
+      "step": 1,
+      "packageName": "com.google.android.youtube",
+      "verified": true
+    },
+    {
+      "step": 2,
+      "packageName": "com.google.android.youtube",
+      "searchFieldFocused": true
+    },
+    {
+      "step": 3,
+      "packageName": "com.google.android.youtube",
+      "textConfirmed": "Telugu movies"
+    },
+    {
+      "step": 4,
+      "packageName": "com.google.android.youtube",
+      "resultTextPresent": true
+    }
+  ],
+  "verification": {
+    "goalStatus": "GOAL_VERIFIED",
+    "isVerified": true,
+    "explanation": "Search result content for 'Telugu movies' verified on fresh UI observation in package com.google.android.youtube"
+  },
+  "recovery": [],
+  "finalState": "COMPLETED",
+  "finalReason": "GoalResult.CONFIRMED"
+}

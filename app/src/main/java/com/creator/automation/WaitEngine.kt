@@ -23,6 +23,20 @@ class WaitEngine(
 
         Log.i(TAG, "WAIT_STARTED: ConditionType=${condition.type}, Expected='${condition.expectedValue}', Timeout=${timeoutMs}ms")
 
+        // Reject invalid wait conditions immediately
+        if ((condition.type == WaitConditionType.WAIT_FOR_PACKAGE ||
+             condition.type == WaitConditionType.WAIT_FOR_TEXT ||
+             condition.type == WaitConditionType.WAIT_FOR_VIEW_ID ||
+             condition.type == WaitConditionType.WAIT_FOR_STATE_SIGNATURE) &&
+            condition.expectedValue.isNullOrBlank()) {
+            Log.e(TAG, "WAIT_REJECTED: ${condition.type} condition created with null or blank expected value.")
+            return WaitResult(
+                success = false,
+                durationMs = 0L,
+                failureReason = "INVALID_WAIT_CONDITION: ${condition.type} expected value cannot be null or blank"
+            )
+        }
+
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             val root = service?.getRootNode()
             val currentSnapshot = if (service != null && root != null) {
