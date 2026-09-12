@@ -26,6 +26,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -63,11 +66,13 @@ fun AgentControlWorkbenchScreen(context: Context) {
     val overlayState by AutomationOverlayState.currentState.collectAsState()
     val runtimeLogs by AgentRuntimeManager.runtimeLogs.collectAsState()
 
+    val runtimeManager = remember { AgentRuntimeManager(context) }
+    val allSessions by runtimeManager.allSessions.collectAsState(initial = emptyList())
+
     var taskInputText by remember { mutableStateOf("Open Chrome and search for Telugu movies") }
     var selectedTab by remember { mutableIntStateOf(0) }
     var statusText by remember { mutableStateOf("Ready") }
 
-    val runtimeManager = remember { AgentRuntimeManager(context) }
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
 
@@ -149,7 +154,7 @@ fun AgentControlWorkbenchScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 1. LIVE EXECUTION STATUS PANEL
+        // 1. LIVE EXECUTION STATUS & CURRENT TASK CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2C))
@@ -161,24 +166,24 @@ fun AgentControlWorkbenchScreen(context: Context) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "LIVE EXECUTION STATUS",
+                        text = "CURRENT TASK STATUS",
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
                         color = Color(0xFF80D8FF)
                     )
                     Surface(
-                        color = when (agentState) {
-                            AgentState.EXECUTING -> Color(0xFF2E7D32)
-                            AgentState.OBSERVING, AgentState.RESOLVING, AgentState.VERIFYING -> Color(0xFF1565C0)
-                            AgentState.COMPLETED -> Color(0xFF00C853)
-                            AgentState.PAUSED, AgentState.NEEDS_USER_INPUT -> Color(0xFFE65100)
-                            AgentState.FAILED, AgentState.CANCELLED -> Color(0xFFC62828)
+                        color = when (activeSession?.currentState ?: agentState.name) {
+                            "EXECUTING", "RUNNING" -> Color(0xFF2E7D32)
+                            "OBSERVING", "RESOLVING", "VERIFYING", "LEARNING" -> Color(0xFF1565C0)
+                            "COMPLETED" -> Color(0xFF00C853)
+                            "PAUSED", "NEEDS_USER_INPUT" -> Color(0xFFE65100)
+                            "FAILED", "CANCELLED" -> Color(0xFFC62828)
                             else -> Color(0xFF424242)
                         },
                         shape = MaterialTheme.shapes.extraSmall
                     ) {
                         Text(
-                            text = agentState.name,
+                            text = activeSession?.currentState ?: agentState.name,
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp,
                             color = Color.White,
@@ -188,15 +193,19 @@ fun AgentControlWorkbenchScreen(context: Context) {
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
-                val currentTaskDesc = activeSession?.taskDescription ?: "No task currently running"
-                Text("Active Task: $currentTaskDesc", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                val currentTaskDesc = activeSession?.taskDescription ?: "No active task"
+                Text("Command: $currentTaskDesc", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
 
                 if (overlayState.targetText != null || overlayState.targetBounds != null) {
                     Text(
-                        text = "Target: '${overlayState.targetText ?: "UI element"}' ${overlayState.targetBounds?.let { "[${it.left},${it.top}][${it.right},${it.bottom}]" } ?: ""}",
+                        text = "Current Target: '${overlayState.targetText ?: "UI Element"}' ${overlayState.targetBounds?.let { "[${it.left},${it.top}][${it.right},${it.bottom}]" } ?: ""}",
                         fontSize = 10.sp,
                         color = Color(0xFFB0BEC5)
                     )
+                }
+
+                if (activeSession?.lastObservationSummary != null) {
+                    Text("Observation: ${activeSession?.lastObservationSummary}", fontSize = 10.sp, color = Color(0xFF80CBC4))
                 }
 
                 if (activeSession?.cancellationReason != null) {
@@ -209,7 +218,42 @@ fun AgentControlWorkbenchScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 2. NATURAL LANGUAGE COMMAND CENTER
+        // 2. EXECUTION PIPELINE MONITORING CARD
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF263238))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("LIVE PIPELINE MONITOR", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF80D8FF))
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val currentState = activeSession?.currentState ?: agentState.name
+                val pipelineStages = listOf(
+                    "GOAL" to true,
+                    "OBSERVE" to (currentState != "IDLE"),
+                    "RESOLVE" to (currentState in listOf("RESOLVING", "EXECUTING", "VERIFYING", "LEARNING", "COMPLETED")),
+                    "ACT" to (currentState in listOf("EXECUTING", "VERIFYING", "LEARNING", "COMPLETED")),
+                    "WAIT" to (currentState in listOf("EXECUTING", "VERIFYING", "LEARNING", "COMPLETED")),
+                    "VERIFY" to (currentState in listOf("VERIFYING", "LEARNING", "COMPLETED")),
+                    "FINAL" to (currentState in listOf("COMPLETED", "FAILED", "CANCELLED"))
+                )
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    pipelineStages.forEach { (stage, isActive) ->
+                        Text(
+                            text = if (isActive) "✓ $stage" else "○ $stage",
+                            fontSize = 9.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isActive) Color(0xFF00E676) else Color.Gray
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 3. NATURAL LANGUAGE COMMAND CENTER
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
@@ -261,7 +305,48 @@ fun AgentControlWorkbenchScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 3. QUICK SYSTEM CONTROLS & HARDWARE ACTUATORS
+        // 3. PERSISTENT RECENT TASKS HISTORY
+        if (allSessions.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFA))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("RECENT TASKS HISTORY (${allSessions.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF333333))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    allSessions.take(5).forEach { session ->
+                        val dateStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(session.lastUpdatedTimestamp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(session.taskDescription, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text("$dateStr | Result: ${session.lastActionResultStatus ?: session.currentState}", fontSize = 10.sp, color = Color.Gray)
+                            }
+                            Text(
+                                text = session.currentState,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when (session.currentState) {
+                                    "COMPLETED" -> Color(0xFF2E7D32)
+                                    "CANCELLED" -> Color(0xFFC62828)
+                                    "FAILED" -> Color(0xFFB71C1C)
+                                    else -> Color(0xFF1565C0)
+                                }
+                            )
+                        }
+                        HorizontalDivider(color = Color(0xFFEEEEEE), thickness = 0.5.dp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // 4. QUICK SYSTEM CONTROLS & HARDWARE ACTUATORS
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFECEFF1))
@@ -320,7 +405,7 @@ fun AgentControlWorkbenchScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 4. DYNAMIC APP LAUNCHER
+        // 5. DYNAMIC APP LAUNCHER
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
@@ -397,7 +482,7 @@ fun AgentControlWorkbenchScreen(context: Context) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 5. DEVELOPER / DIAGNOSTIC TABS
+        // 6. DEVELOPER / DIAGNOSTIC TABS
         ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
             val tabTitles = listOf(
                 "Overview", "Tests", "Capabilities", "Sensors",

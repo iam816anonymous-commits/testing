@@ -3,6 +3,7 @@ package com.creator.automation
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +16,8 @@ class AgentRuntimeManager(
     private val agentCore: AgentCore = AgentCore(context),
     private val observationProvider: ObservationProvider = AccessibilityObservationProvider()
 ) {
+
+    val allSessions: Flow<List<AgentSessionRecord>> = sessionDao.getAllSessionsFlow()
 
     companion object {
         private const val TAG = "AgentRuntimeManager"
@@ -40,6 +43,9 @@ class AgentRuntimeManager(
     ): AgentStepResult = withContext(Dispatchers.IO) {
         logRuntimeActivity("RUNTIME_START: Request task '$taskDescription'")
 
+        // Reset/resume agent state from PAUSED or CANCELLED to IDLE for new task submission
+        agentCore.resumeAgent()
+
         val existing = sessionDao.getActiveSessionByTaskDescription(taskDescription)
         val session = if (existing != null) {
             logRuntimeActivity("RUNTIME_SESSION_EXISTS: Reusing existing session ${existing.sessionId}")
@@ -64,32 +70,51 @@ class AgentRuntimeManager(
             )
         )
 
-        // Execute task step via AgentCore
-        val stepResult = agentCore.executeTaskStep(
-            taskDescription = taskDescription,
-            trigger = trigger,
-            globalAutonomousEnabled = globalAutonomousEnabled
+        // Execute multi-step task loop via AgentCore
+        var stepResult: AgentStepResult? = null
+        var loopCount = 0
+        val maxSteps = 10
+
+        do {
+            stepResult = agentCore.executeTaskStep(
+                taskDescription = taskDescription,
+                trigger = trigger,
+                globalAutonomousEnabled = globalAutonomousEnabled
+            )
+            loopCount++
+
+            val finalState = stepResult.nextState
+            val isFinished = finalState in listOf(AgentState.COMPLETED, AgentState.FAILED, AgentState.CANCELLED, AgentState.PAUSED, AgentState.NEEDS_USER_INPUT)
+
+            val updatedSession = session.copy(
+                currentState = finalState.name,
+                checkpointStateSignature = stepResult.observation?.stateSignature,
+                lastObservationSummary = stepResult.observation?.summary,
+                lastActionResultStatus = stepResult.actionResult?.status?.name,
+                lastActionResultMessage = stepResult.decisionReason ?: stepResult.actionResult?.message,
+                lastVerificationStatus = stepResult.verificationStatus.name,
+                isCompleted = (finalState == AgentState.COMPLETED || finalState == AgentState.FAILED),
+                isCancelled = (finalState == AgentState.CANCELLED),
+                completionTimestamp = if (finalState == AgentState.COMPLETED || finalState == AgentState.FAILED) System.currentTimeMillis() else null,
+                lastUpdatedTimestamp = System.currentTimeMillis()
+            )
+
+            checkpointSession(updatedSession)
+            logRuntimeActivity("RUNTIME_STEP_FINISHED: Step $loopCount for Session ${session.sessionId} state=${finalState.name}")
+
+            if (isFinished || _activeSession.value?.isCancelled == true) break
+
+        } while (loopCount < maxSteps)
+
+        return@withContext stepResult ?: AgentStepResult(
+            stateBefore = AgentState.IDLE,
+            observation = null,
+            decisionReason = "No steps executed",
+            actionExecuted = null,
+            actionResult = null,
+            verificationStatus = VerificationStatus.FAILED,
+            nextState = AgentState.FAILED
         )
-
-        // Update checkpoint post-execution
-        val finalState = stepResult.nextState
-        val updatedSession = session.copy(
-            currentState = finalState.name,
-            checkpointStateSignature = stepResult.observation?.stateSignature,
-            lastObservationSummary = stepResult.observation?.summary,
-            lastActionResultStatus = stepResult.actionResult?.status?.name,
-            lastActionResultMessage = stepResult.decisionReason ?: stepResult.actionResult?.message,
-            lastVerificationStatus = stepResult.verificationStatus.name,
-            isCompleted = (finalState == AgentState.COMPLETED || finalState == AgentState.FAILED),
-            isCancelled = (finalState == AgentState.CANCELLED),
-            completionTimestamp = if (finalState == AgentState.COMPLETED || finalState == AgentState.FAILED) System.currentTimeMillis() else null,
-            lastUpdatedTimestamp = System.currentTimeMillis()
-        )
-
-        checkpointSession(updatedSession)
-        logRuntimeActivity("RUNTIME_STEP_FINISHED: Session ${session.sessionId} state=${finalState.name}")
-
-        return@withContext stepResult
     }
 
     suspend fun recoverInterruptedSessions(): Int = withContext(Dispatchers.IO) {
@@ -185,19 +210,21 @@ class AgentRuntimeManager(
     }
 
     suspend fun cancelActiveSession(reason: String = "User cancelled session"): Boolean = withContext(Dispatchers.IO) {
-        val current = _activeSession.value ?: return@withContext false
-        logRuntimeActivity("RUNTIME_CANCEL: Cancelling session ${current.sessionId} ($reason)")
+        val current = _activeSession.value
+        logRuntimeActivity("RUNTIME_CANCEL: Cancelling session ${current?.sessionId ?: "active"} ($reason)")
 
         agentCore.cancelAgent()
+        AutomationOverlayState.clearState()
 
-        val cancelledSession = current.copy(
-            currentState = AgentState.CANCELLED.name,
-            isCancelled = true,
-            cancellationReason = reason,
-            lastUpdatedTimestamp = System.currentTimeMillis()
-        )
-
-        checkpointSession(cancelledSession)
+        if (current != null) {
+            val cancelledSession = current.copy(
+                currentState = AgentState.CANCELLED.name,
+                isCancelled = true,
+                cancellationReason = reason,
+                lastUpdatedTimestamp = System.currentTimeMillis()
+            )
+            checkpointSession(cancelledSession)
+        }
         return@withContext true
     }
 
