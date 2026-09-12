@@ -315,11 +315,15 @@ object HardwareActuatorRegistry {
 
     fun findActuatorForGoal(taskDescription: String): HardwareActuator? {
         val desc = taskDescription.lowercase()
+        // Exclude observation/perception commands like "read screen", "capture screen", "see screen"
+        if (desc.contains("read") || desc.contains("capture") || desc.contains("see") || desc.contains("scan")) {
+            return null
+        }
         return when {
             desc.contains("flashlight") || desc.contains("torch") || desc.contains("flash") -> getActuator(HardwareCapabilityType.FLASHLIGHT)
             desc.contains("vibrate") || desc.contains("haptic") -> getActuator(HardwareCapabilityType.HAPTIC)
-            desc.contains("mute") || desc.contains("silent") || desc.contains("audio") -> getActuator(HardwareCapabilityType.AUDIO)
-            desc.contains("wake") || desc.contains("screen") || desc.contains("display") -> getActuator(HardwareCapabilityType.DISPLAY)
+            desc.contains("mute") || desc.contains("unmute") || desc.contains("silent") -> getActuator(HardwareCapabilityType.AUDIO)
+            desc.contains("wake display") || desc.contains("wake screen") || desc.contains("wake up screen") || desc.contains("turn on screen") || desc.contains("turn on display") -> getActuator(HardwareCapabilityType.DISPLAY)
             else -> null
         }
     }

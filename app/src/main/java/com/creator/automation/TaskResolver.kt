@@ -218,6 +218,14 @@ class TaskResolver(
         }
 
         if (!searchQuery.isNullOrBlank()) {
+            // Clean filler prefixes from searchQuery
+            val cleanQuery = searchQuery
+                .removePrefix("for ")
+                .removePrefix("about ")
+                .removePrefix("on ")
+                .removePrefix("in ")
+                .trim()
+
             // Step 2a: TYPE_TEXT
             steps.add(
                 WorkflowStep(
@@ -225,19 +233,20 @@ class TaskResolver(
                     action = AutomationAction(
                         type = ActionType.TYPE_TEXT,
                         targetValue = "Search",
-                        inputData = searchQuery,
+                        inputData = cleanQuery,
                         timeoutMs = 5000L,
                         semantics = ActionSemantics.REPEATABLE
                     )
                 )
             )
 
-            // Step 2b: PRESS_ENTER
+            // Step 2b: SUBMIT_INPUT (uses 3-tier generic submit pipeline)
             steps.add(
                 WorkflowStep(
                     id = "step_${stepIdCounter++}",
                     action = AutomationAction(
-                        type = ActionType.PRESS_ENTER,
+                        type = ActionType.SUBMIT_INPUT,
+                        targetValue = cleanQuery,
                         timeoutMs = 5000L,
                         semantics = ActionSemantics.REPEATABLE,
                         waitCondition = WaitCondition(

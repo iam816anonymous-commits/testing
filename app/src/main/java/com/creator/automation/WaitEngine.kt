@@ -3,6 +3,16 @@ package com.creator.automation
 import android.util.Log
 import kotlinx.coroutines.delay
 
+enum class TimeoutSource {
+    TARGET_RESOLUTION,
+    ACTION_DISPATCH,
+    WAIT_CONDITION,
+    OBSERVATION,
+    VERIFICATION,
+    RECOVERY,
+    RUNTIME
+}
+
 class WaitEngine(
     private val actionResolver: ActionResolver = ActionResolver()
 ) {
@@ -99,11 +109,18 @@ class WaitEngine(
         }
 
         val duration = System.currentTimeMillis() - startTime
-        Log.w(TAG, "WAIT_TIMEOUT: Condition '${condition.type}' not met after ${duration}ms")
+        val timeoutSource = when (condition.type) {
+            WaitConditionType.WAIT_FOR_PACKAGE -> TimeoutSource.OBSERVATION
+            WaitConditionType.WAIT_FOR_TEXT, WaitConditionType.WAIT_FOR_VIEW_ID -> TimeoutSource.TARGET_RESOLUTION
+            WaitConditionType.WAIT_FOR_STATE_CHANGE, WaitConditionType.WAIT_FOR_VISUAL_CHANGE -> TimeoutSource.VERIFICATION
+            else -> TimeoutSource.WAIT_CONDITION
+        }
+
+        Log.w(TAG, "WAIT_TIMEOUT [Source=$timeoutSource]: Condition '${condition.type}' not met after ${duration}ms")
         return WaitResult(
             success = false,
             durationMs = duration,
-            failureReason = "Timeout waiting for ${condition.type} ('${condition.expectedValue}')"
+            failureReason = "Timeout waiting for ${condition.type} ('${condition.expectedValue}') [Source=$timeoutSource]"
         )
     }
 }
