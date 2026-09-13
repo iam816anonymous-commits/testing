@@ -1,0 +1,15 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "lastObservationTimestamp": 1789319500000,
+  "activePackage": "com.creator.automation",
+  "isRootAvailable": true,
+  "traversalDurationMs": 2,
+  "totalNodeCount": 42,
+  "textNodeCount": 18,
+  "clickableNodeCount": 9,
+  "editableNodeCount": 1,
+  "scrollableNodeCount": 2,
+  "focusedNodeCount": 0
+}

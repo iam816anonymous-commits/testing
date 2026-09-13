@@ -1,0 +1,56 @@
+[
+  {
+    "testId": "L2-01",
+    "testName": "Home Screen Perception",
+    "category": "SCREEN_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "Launcher UI tree traversed with package, visible texts, and clickable nodes",
+    "preconditions": "Return to Home screen on TECNO IN6",
+    "evidence": "Robolectric environment lacks active system launcher UI window"
+  },
+  {
+    "testId": "L2-02",
+    "testName": "Settings Navigation Perception",
+    "category": "SCREEN_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "Settings app tree traversed showing com.android.settings package and menu items",
+    "preconditions": "Settings app open on TECNO IN6",
+    "evidence": "Requires manual Settings launch on device"
+  },
+  {
+    "testId": "L2-03",
+    "testName": "Chrome Input Perception",
+    "category": "SCREEN_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "Chrome address bar and controls observed with bounds and editable flag",
+    "preconditions": "Chrome open on TECNO IN6",
+    "evidence": "Requires live Chrome window accessibility tree"
+  },
+  {
+    "testId": "L2-04",
+    "testName": "YouTube Layout Perception",
+    "category": "SCREEN_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "YouTube feeds, search icon, and scrollable container observed",
+    "preconditions": "YouTube open on TECNO IN6",
+    "evidence": "Requires live YouTube window accessibility tree"
+  },
+  {
+    "testId": "L2-05",
+    "testName": "Navigation Screen Change Detection",
+    "category": "STATE_SIGNATURE",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "State signature changes across screen transitions with fresh timestamps",
+    "preconditions": "User navigates between apps on device",
+    "evidence": "Signature comparison logic validated via unit tests"
+  },
+  {
+    "testId": "L2-06",
+    "testName": "Empty/Limited Observation Perception",
+    "category": "UNAVAILABLE_HANDLING",
+    "headlessStatus": "PASS",
+    "physicalRequirement": "Null root returns isRootAvailable=false and totalNodeCount=0 truthfully",
+    "preconditions": "ActionResolver.captureSnapshot(null)",
+    "evidence": "Returns UiSnapshot(isRootAvailable=false, totalNodeCount=0)"
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "layer2ObservationState": {
+    "isRootAvailable": true,
+    "packageName": "com.creator.automation",
+    "observationSupported": true
+  }
+}

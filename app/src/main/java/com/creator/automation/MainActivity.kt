@@ -407,6 +407,7 @@ fun DiagnosticControlCenter(context: Context) {
     val coroutineScope = rememberCoroutineScope()
 
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
+    val diagnosticState by AutomationAccessibilityService.diagnosticState.collectAsState()
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val isCameraRunning by CameraObservationProvider.isCameraRunning.collectAsState()
     val agentState by AgentCore.agentState.collectAsState()
@@ -415,6 +416,8 @@ fun DiagnosticControlCenter(context: Context) {
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var statusText by remember { mutableStateOf("Ready") }
+
+    var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
 
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
@@ -493,6 +496,93 @@ fun DiagnosticControlCenter(context: Context) {
                         text = "Bounds: [${b.left}, ${b.top}][${b.right}, ${b.bottom}] | Cursor: (${overlayState.cursorX}, ${overlayState.cursorY})",
                         fontSize = 10.sp
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 1 Accessibility Diagnostics Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = if (diagnosticState.serviceConnected) Color(0xFFE8F5E9) else Color(0xFFFFF3E0))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 1 ACCESSIBILITY DIAGNOSTICS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (diagnosticState.serviceConnected) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
+                    Text(
+                        text = if (diagnosticState.serviceConnected) "CONNECTED" else "DISCONNECTED",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = if (diagnosticState.serviceConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Created: ${diagnosticState.serviceCreated} | Connected: ${diagnosticState.serviceConnected} | ConnTime: ${diagnosticState.connectedTimestamp}", fontSize = 10.sp)
+                Text("Events: count=${diagnosticState.eventCount} | lastType=${diagnosticState.lastEventType} | lastTime=${diagnosticState.lastEventTimestamp}", fontSize = 10.sp)
+                Text("Active Package: ${diagnosticState.activePackage}", fontSize = 10.sp)
+                Text("Root Window: available=${diagnosticState.rootAvailable} | class=${diagnosticState.rootNodeClass} | children=${diagnosticState.rootNodeChildCount}", fontSize = 10.sp)
+                Text("Observation Time: ${diagnosticState.observationTimestamp} | Disconnected: ${diagnosticState.serviceDisconnected} (${diagnosticState.disconnectTimestamp})", fontSize = 10.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 2 Screen Observation & Perception Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE1F5FE))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 2 SCREEN OBSERVATION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFF0277BD)
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val root = service?.getRootNode()
+                            currentSnapshot = ActionResolver.captureSnapshot(root, service?.packageName ?: "")
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("REFRESH OBSERVATION", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                val snap = currentSnapshot
+                if (snap == null) {
+                    Text("No screen observation captured yet. Tap REFRESH OBSERVATION.", fontSize = 10.sp, color = Color.Gray)
+                } else {
+                    Text("Package: ${snap.packageName} | Root Available: ${snap.isRootAvailable}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Nodes: total=${snap.totalNodeCount} | text=${snap.textNodeCount} | clickable=${snap.clickableNodeCount} | editable=${snap.editableNodeCount} | scrollable=${snap.scrollableNodeCount} | focused=${snap.focusedNodeCount}", fontSize = 10.sp)
+                    Text("Traversal Duration: ${snap.traversalDurationMs} ms | Timestamp: ${snap.timestamp}", fontSize = 10.sp)
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Observed UI Elements (Top 10):", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF01579B))
+                    snap.allNodes.take(10).forEachIndexed { idx, node ->
+                        Text(
+                            text = "${idx + 1}. [${node.className?.substringAfterLast('.') ?: "View"}] text=\"${node.text ?: ""}\" desc=\"${node.contentDescription ?: ""}\" editable=${node.isEditable} clickable=${node.isClickable} bounds=${node.boundsInScreen ?: "[]"}",
+                            fontSize = 9.sp
+                        )
+                    }
                 }
             }
         }

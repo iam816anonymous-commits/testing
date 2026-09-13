@@ -31,6 +31,7 @@ class ActionResolver {
 
     companion object {
         private const val TAG = "ActionResolver"
+        private const val MAX_TRAVERSAL_DEPTH = 30
 
         private val LOGIN_PROMPT_KEYWORDS = listOf(
             "sign in",
@@ -45,11 +46,18 @@ class ActionResolver {
          * Converts a raw Android AccessibilityNodeInfo tree into a lightweight UiSnapshot.
          */
         fun captureSnapshot(root: AccessibilityNodeInfo?, fallbackPackageName: String = ""): UiSnapshot {
+            val startTime = System.currentTimeMillis()
             if (root == null) {
-                return UiSnapshot(packageName = fallbackPackageName)
+                val duration = System.currentTimeMillis() - startTime
+                return UiSnapshot(
+                    packageName = fallbackPackageName.ifBlank { "unknown" },
+                    timestamp = startTime,
+                    isRootAvailable = false,
+                    traversalDurationMs = duration
+                )
             }
 
-            val packageName = root.packageName?.toString() ?: fallbackPackageName
+            val packageName = root.packageName?.toString() ?: fallbackPackageName.ifBlank { "unknown" }
             val visibleTexts = mutableListOf<String>()
             val contentDescriptions = mutableListOf<String>()
             val viewIds = mutableListOf<String>()
@@ -59,8 +67,8 @@ class ActionResolver {
             val focusedNodes = mutableListOf<UiNodeInfo>()
             val allNodes = mutableListOf<UiNodeInfo>()
 
-            fun traverse(node: AccessibilityNodeInfo?) {
-                if (node == null) return
+            fun traverse(node: AccessibilityNodeInfo?, depth: Int = 0) {
+                if (node == null || depth > MAX_TRAVERSAL_DEPTH) return
 
                 val text = node.text?.toString()?.trim()
                 val contentDesc = node.contentDescription?.toString()?.trim()
@@ -123,15 +131,25 @@ class ActionResolver {
                 }
 
                 for (i in 0 until node.childCount) {
-                    traverse(node.getChild(i))
+                    val child = try {
+                        node.getChild(i)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (child != null) {
+                        traverse(child, depth + 1)
+                    }
                 }
             }
 
             traverse(root)
 
+            val duration = System.currentTimeMillis() - startTime
             val snapshot = UiSnapshot(
                 packageName = packageName,
-                timestamp = System.currentTimeMillis(),
+                timestamp = startTime,
+                isRootAvailable = true,
+                traversalDurationMs = duration,
                 visibleTexts = visibleTexts.distinct(),
                 contentDescriptions = contentDescriptions.distinct(),
                 viewIds = viewIds.distinct(),
@@ -142,7 +160,7 @@ class ActionResolver {
                 allNodes = allNodes
             )
 
-            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$packageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}")
+            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$packageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}, durationMs=${duration}ms")
             return snapshot
         }
     }

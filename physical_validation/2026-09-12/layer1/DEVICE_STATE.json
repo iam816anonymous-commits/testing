@@ -1,0 +1,11 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "capabilities": {
+    "ACCESSIBILITY_PERMISSION_ENABLED": false,
+    "ACCESSIBILITY_SERVICE_CONNECTED": false,
+    "ACCESSIBILITY_ROOT_AVAILABLE": false,
+    "ACCESSIBILITY_EVENTS_RECEIVED": false
+  }
+}

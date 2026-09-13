@@ -6,6 +6,8 @@ data class UiSnapshot(
     val id: String = UUID.randomUUID().toString(),
     val packageName: String,
     val timestamp: Long = System.currentTimeMillis(),
+    val isRootAvailable: Boolean = true,
+    val traversalDurationMs: Long = 0L,
     val visibleTexts: List<String> = emptyList(),
     val contentDescriptions: List<String> = emptyList(),
     val viewIds: List<String> = emptyList(),
@@ -20,6 +22,8 @@ data class UiSnapshot(
     val clickableNodeCount: Int get() = clickableNodes.size
     val scrollableNodeCount: Int get() = scrollableNodes.size
     val editableNodeCount: Int get() = editableNodes.size
+    val focusedNodeCount: Int get() = focusedNodes.size
+    val textNodeCount: Int get() = visibleTexts.size
 }
 
 data class UiNodeInfo(
