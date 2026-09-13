@@ -1,10 +1,10 @@
-# CreatorAutomation — Layer 2 Known Failures & Limitations
+# CreatorAutomation — Layer 2 Cross-App Observation Known Failures & Limitations
 
 ## HEADLESS / UNIT TEST LIMITATIONS
 
-1. **Live Accessibility Node Trees in Headless Environments**
-   - Robolectric unit tests simulate AccessibilityNodeInfo trees via mock or synthetic nodes.
-   - Physical tests L2-01 through L2-05 require live window accessibility events on TECNO IN6 hardware and are classified as `BLOCKED` in headless environments to avoid false PASS claims.
+1. **Cross-App Window Events in Headless Environments**
+   - Robolectric unit tests do not execute live multi-process Android system window switching.
+   - Physical tests L2-X01 through L2-X06 are classified as `BLOCKED` in headless environments to avoid false PASS reports.
 
-2. **Truthful Null Root Reporting**
-   - Test L2-06 verifies that when no root accessibility node is available, the snapshot engine truthfully reports `isRootAvailable = false` with 0 nodes, preventing false success reports.
+2. **Overlay View Window Manager Permissions in Headless Mocking**
+   - Test L2-X07 verifies overlay toggle state logic directly in `CrossAppObservationTest.kt`.

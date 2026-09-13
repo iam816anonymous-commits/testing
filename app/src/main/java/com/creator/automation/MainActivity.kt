@@ -408,6 +408,7 @@ fun DiagnosticControlCenter(context: Context) {
 
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
     val diagnosticState by AutomationAccessibilityService.diagnosticState.collectAsState()
+    val crossAppObservationState by AutomationAccessibilityService.crossAppObservationState.collectAsState()
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val isCameraRunning by CameraObservationProvider.isCameraRunning.collectAsState()
     val agentState by AgentCore.agentState.collectAsState()
@@ -584,6 +585,53 @@ fun DiagnosticControlCenter(context: Context) {
                         )
                     }
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 2 Extension: Cross-App Observation Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = if (crossAppObservationState.observationActive) Color(0xFFE8F5E9) else Color(0xFFECEFF1))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "CROSS-APP OBSERVATION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (crossAppObservationState.observationActive) Color(0xFF2E7D32) else Color(0xFF37474F)
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val nextActive = !crossAppObservationState.observationActive
+                            service?.setCrossAppObservationActive(nextActive)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (crossAppObservationState.observationActive) Color(0xFFC62828) else Color(0xFF2E7D32)
+                        ),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (crossAppObservationState.observationActive) "STOP CROSS-APP" else "START CROSS-APP",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Active: ${crossAppObservationState.observationActive} | App: ${crossAppObservationState.foregroundPackage}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("Root: ${crossAppObservationState.rootAvailable} | Class: ${crossAppObservationState.foregroundClass.substringAfterLast('.')}", fontSize = 10.sp)
+                Text("Nodes: total=${crossAppObservationState.nodeCount} | text=${crossAppObservationState.textNodeCount} | clickable=${crossAppObservationState.clickableCount} | editable=${crossAppObservationState.editableCount} | scrollable=${crossAppObservationState.scrollableCount}", fontSize = 10.sp)
+                Text("Events: count=${crossAppObservationState.eventCount} | type=${crossAppObservationState.lastEventType}", fontSize = 10.sp)
+                Text("Observation Timestamp: ${crossAppObservationState.observationTimestamp}", fontSize = 10.sp)
             }
         }
 

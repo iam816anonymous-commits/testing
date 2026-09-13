@@ -32,6 +32,7 @@ class ActionResolver {
     companion object {
         private const val TAG = "ActionResolver"
         private const val MAX_TRAVERSAL_DEPTH = 30
+        private const val AGENT_PACKAGE_NAME = "com.creator.automation"
 
         private val LOGIN_PROMPT_KEYWORDS = listOf(
             "sign in",
@@ -44,6 +45,7 @@ class ActionResolver {
 
         /**
          * Converts a raw Android AccessibilityNodeInfo tree into a lightweight UiSnapshot.
+         * When observing a non-agent target application, filters out CreatorAutomation overlay nodes to prevent pollution.
          */
         fun captureSnapshot(root: AccessibilityNodeInfo?, fallbackPackageName: String = ""): UiSnapshot {
             val startTime = System.currentTimeMillis()
@@ -57,7 +59,9 @@ class ActionResolver {
                 )
             }
 
-            val packageName = root.packageName?.toString() ?: fallbackPackageName.ifBlank { "unknown" }
+            val rawPackageName = root.packageName?.toString() ?: fallbackPackageName.ifBlank { "unknown" }
+            val isTargetingAgent = rawPackageName == AGENT_PACKAGE_NAME
+
             val visibleTexts = mutableListOf<String>()
             val contentDescriptions = mutableListOf<String>()
             val viewIds = mutableListOf<String>()
@@ -69,6 +73,12 @@ class ActionResolver {
 
             fun traverse(node: AccessibilityNodeInfo?, depth: Int = 0) {
                 if (node == null || depth > MAX_TRAVERSAL_DEPTH) return
+
+                val nodePkg = node.packageName?.toString()
+                // Zero-pollution check: exclude CreatorAutomation diagnostic overlay nodes when observing external apps
+                if (!isTargetingAgent && nodePkg == AGENT_PACKAGE_NAME) {
+                    return
+                }
 
                 val text = node.text?.toString()?.trim()
                 val contentDesc = node.contentDescription?.toString()?.trim()
@@ -146,7 +156,7 @@ class ActionResolver {
 
             val duration = System.currentTimeMillis() - startTime
             val snapshot = UiSnapshot(
-                packageName = packageName,
+                packageName = rawPackageName,
                 timestamp = startTime,
                 isRootAvailable = true,
                 traversalDurationMs = duration,
@@ -160,7 +170,7 @@ class ActionResolver {
                 allNodes = allNodes
             )
 
-            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$packageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}, durationMs=${duration}ms")
+            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$rawPackageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}, durationMs=${duration}ms")
             return snapshot
         }
     }

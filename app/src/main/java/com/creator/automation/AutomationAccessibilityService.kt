@@ -1,12 +1,22 @@
 package com.creator.automation
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.LinearLayout
+import android.widget.TextView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +44,22 @@ data class AccessibilityDiagnosticState(
     val disconnectTimestamp: Long = 0L
 )
 
+data class CrossAppObservationState(
+    val observationActive: Boolean = false,
+    val foregroundPackage: String = "unknown",
+    val foregroundClass: String = "unknown",
+    val rootAvailable: Boolean = false,
+    val nodeCount: Int = 0,
+    val textNodeCount: Int = 0,
+    val clickableCount: Int = 0,
+    val editableCount: Int = 0,
+    val scrollableCount: Int = 0,
+    val focusedCount: Int = 0,
+    val observationTimestamp: Long = 0L,
+    val eventCount: Long = 0L,
+    val lastEventType: String = "None"
+)
+
 class AutomationAccessibilityService : AccessibilityService() {
 
     companion object {
@@ -54,6 +80,9 @@ class AutomationAccessibilityService : AccessibilityService() {
         private val _diagnosticState = MutableStateFlow(AccessibilityDiagnosticState())
         val diagnosticState: StateFlow<AccessibilityDiagnosticState> = _diagnosticState.asStateFlow()
 
+        private val _crossAppObservationState = MutableStateFlow(CrossAppObservationState())
+        val crossAppObservationState: StateFlow<CrossAppObservationState> = _crossAppObservationState.asStateFlow()
+
         private val _currentLearningMode = MutableStateFlow(LearningMode.IDLE)
         val currentLearningMode: StateFlow<LearningMode> = _currentLearningMode.asStateFlow()
 
@@ -67,6 +96,7 @@ class AutomationAccessibilityService : AccessibilityService() {
 
         fun resetDiagnosticsForTesting() {
             _diagnosticState.value = AccessibilityDiagnosticState()
+            _crossAppObservationState.value = CrossAppObservationState()
             _isServiceEnabled.value = false
             _activePackageName.value = ""
             _lastAccessibilityEvent.value = "None"
@@ -76,6 +106,11 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var windowManager: WindowManager? = null
+    private var overlayView: View? = null
+    private var overlayTextView: TextView? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -94,6 +129,95 @@ class AutomationAccessibilityService : AccessibilityService() {
             serviceDisconnected = false
         )
         Log.i(TAG, "AutomationAccessibilityService connected")
+    }
+
+    fun setCrossAppObservationActive(active: Boolean) {
+        val current = _crossAppObservationState.value
+        if (current.observationActive == active) return
+
+        _crossAppObservationState.value = current.copy(observationActive = active)
+
+        mainHandler.post {
+            if (active) {
+                showDiagnosticOverlay()
+            } else {
+                hideDiagnosticOverlay()
+            }
+        }
+    }
+
+    private fun showDiagnosticOverlay() {
+        if (overlayView != null) return
+        try {
+            windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            if (windowManager == null) return
+
+            val layoutParams = WindowManager.LayoutParams().apply {
+                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_PHONE
+                }
+                flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                format = PixelFormat.TRANSLUCENT
+                width = WindowManager.LayoutParams.WRAP_CONTENT
+                height = WindowManager.LayoutParams.WRAP_CONTENT
+                gravity = Gravity.TOP or Gravity.START
+                x = 20
+                y = 50
+            }
+
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.argb(220, 20, 20, 30))
+                setPadding(16, 12, 16, 12)
+            }
+
+            val tv = TextView(this).apply {
+                setTextColor(Color.GREEN)
+                textSize = 10f
+                text = "CA DIAGNOSTIC OVERLAY\nActive: YES\nApp: unknown"
+            }
+
+            container.addView(tv)
+            overlayView = container
+            overlayTextView = tv
+
+            windowManager?.addView(overlayView, layoutParams)
+            Log.i(TAG, "DIAGNOSTIC_OVERLAY_SHOW")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing diagnostic overlay", e)
+        }
+    }
+
+    private fun hideDiagnosticOverlay() {
+        if (overlayView != null && windowManager != null) {
+            try {
+                windowManager?.removeView(overlayView)
+                Log.i(TAG, "DIAGNOSTIC_OVERLAY_HIDE")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error removing diagnostic overlay", e)
+            } finally {
+                overlayView = null
+                overlayTextView = null
+            }
+        }
+    }
+
+    private fun updateDiagnosticOverlayText(state: CrossAppObservationState) {
+        if (overlayTextView == null) return
+        mainHandler.post {
+            overlayTextView?.text = "CA CROSS-APP OBSERVATION\n" +
+                    "App: ${state.foregroundPackage}\n" +
+                    "Root: ${if (state.rootAvailable) "YES" else "NO"}\n" +
+                    "Nodes: ${state.nodeCount} | Text: ${state.textNodeCount}\n" +
+                    "Click: ${state.clickableCount} | Edit: ${state.editableCount}\n" +
+                    "Scroll: ${state.scrollableCount} | Focus: ${state.focusedCount}\n" +
+                    "Events: ${state.eventCount} (${state.lastEventType})"
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -125,6 +249,27 @@ class AutomationAccessibilityService : AccessibilityService() {
             rootNodeChildCount = root?.childCount ?: 0,
             observationTimestamp = if (hasRoot) now else currentDiag.observationTimestamp
         )
+
+        val crossApp = _crossAppObservationState.value
+        if (crossApp.observationActive) {
+            val snapshot = ActionResolver.captureSnapshot(root, pkg)
+            val updatedCrossApp = crossApp.copy(
+                foregroundPackage = if (pkg.isNotBlank()) pkg else crossApp.foregroundPackage,
+                foregroundClass = event.className?.toString() ?: crossApp.foregroundClass,
+                rootAvailable = snapshot.isRootAvailable,
+                nodeCount = snapshot.totalNodeCount,
+                textNodeCount = snapshot.textNodeCount,
+                clickableCount = snapshot.clickableNodeCount,
+                editableCount = snapshot.editableNodeCount,
+                scrollableCount = snapshot.scrollableNodeCount,
+                focusedCount = snapshot.focusedNodeCount,
+                observationTimestamp = snapshot.timestamp,
+                eventCount = crossApp.eventCount + 1,
+                lastEventType = eventTypeName
+            )
+            _crossAppObservationState.value = updatedCrossApp
+            updateDiagnosticOverlayText(updatedCrossApp)
+        }
 
         // Capture user interactions when in TRAINING mode
         if (_currentLearningMode.value == LearningMode.TRAINING && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
@@ -192,6 +337,7 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        hideDiagnosticOverlay()
         if (instance == this) {
             instance = null
         }

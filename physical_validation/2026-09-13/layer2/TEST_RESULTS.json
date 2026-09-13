@@ -1,56 +1,65 @@
 [
   {
-    "testId": "L2-01",
-    "testName": "Home Screen Perception",
-    "category": "SCREEN_OBSERVATION",
+    "testId": "L2-X01",
+    "testName": "CreatorAutomation -> Home",
+    "category": "CROSS_APP_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "Launcher UI tree traversed with package, visible texts, and clickable nodes",
-    "preconditions": "Return to Home screen on TECNO IN6",
-    "evidence": "Robolectric environment lacks active system launcher UI window"
+    "physicalRequirement": "foregroundPackage updates to launcher package on Home press",
+    "preconditions": "Start cross-app observation and press Home on TECNO IN6",
+    "evidence": "Robolectric environment lacks system launcher IPC transition"
   },
   {
-    "testId": "L2-02",
-    "testName": "Settings Navigation Perception",
-    "category": "SCREEN_OBSERVATION",
+    "testId": "L2-X02",
+    "testName": "Open Chrome Manually",
+    "category": "CROSS_APP_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "Settings app tree traversed showing com.android.settings package and menu items",
-    "preconditions": "Settings app open on TECNO IN6",
-    "evidence": "Requires manual Settings launch on device"
+    "physicalRequirement": "foregroundPackage = com.android.chrome while CA is backgrounded",
+    "preconditions": "Launch Chrome from Home on TECNO IN6",
+    "evidence": "Requires live Chrome window accessibility events"
   },
   {
-    "testId": "L2-03",
-    "testName": "Chrome Input Perception",
-    "category": "SCREEN_OBSERVATION",
+    "testId": "L2-X03",
+    "testName": "Change Chrome Screen",
+    "category": "CROSS_APP_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "Chrome address bar and controls observed with bounds and editable flag",
-    "preconditions": "Chrome open on TECNO IN6",
-    "evidence": "Requires live Chrome window accessibility tree"
+    "physicalRequirement": "eventCount increases and timestamp updates when navigating Chrome",
+    "preconditions": "Navigate in Chrome on TECNO IN6",
+    "evidence": "Requires live AccessibilityEvent delivery from Chrome"
   },
   {
-    "testId": "L2-04",
-    "testName": "YouTube Layout Perception",
-    "category": "SCREEN_OBSERVATION",
+    "testId": "L2-X04",
+    "testName": "YouTube Cross-App Observation",
+    "category": "CROSS_APP_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "YouTube feeds, search icon, and scrollable container observed",
-    "preconditions": "YouTube open on TECNO IN6",
-    "evidence": "Requires live YouTube window accessibility tree"
+    "physicalRequirement": "foregroundPackage = com.google.android.youtube with node tree captured",
+    "preconditions": "Open YouTube on TECNO IN6",
+    "evidence": "Requires live YouTube window accessibility events"
   },
   {
-    "testId": "L2-05",
-    "testName": "Navigation Screen Change Detection",
-    "category": "STATE_SIGNATURE",
+    "testId": "L2-X05",
+    "testName": "Settings Cross-App Observation",
+    "category": "CROSS_APP_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "State signature changes across screen transitions with fresh timestamps",
-    "preconditions": "User navigates between apps on device",
-    "evidence": "Signature comparison logic validated via unit tests"
+    "physicalRequirement": "foregroundPackage = com.android.settings with node tree captured",
+    "preconditions": "Open Settings on TECNO IN6",
+    "evidence": "Requires live Settings window accessibility events"
   },
   {
-    "testId": "L2-06",
-    "testName": "Empty/Limited Observation Perception",
-    "category": "UNAVAILABLE_HANDLING",
+    "testId": "L2-X06",
+    "testName": "Return to CreatorAutomation",
+    "category": "CROSS_APP_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "foregroundPackage switches back to com.creator.automation cleanly",
+    "preconditions": "Bring CreatorAutomation back to foreground on TECNO IN6",
+    "evidence": "Requires window state change event to com.creator.automation"
+  },
+  {
+    "testId": "L2-X07",
+    "testName": "Overlay Lifecycle",
+    "category": "OVERLAY_LIFECYCLE",
     "headlessStatus": "PASS",
-    "physicalRequirement": "Null root returns isRootAvailable=false and totalNodeCount=0 truthfully",
-    "preconditions": "ActionResolver.captureSnapshot(null)",
-    "evidence": "Returns UiSnapshot(isRootAvailable=false, totalNodeCount=0)"
+    "physicalRequirement": "Attach and remove TYPE_ACCESSIBILITY_OVERLAY float view cleanly without duplicate views",
+    "preconditions": "Toggle setCrossAppObservationActive(true) then setCrossAppObservationActive(false)",
+    "evidence": "CrossAppObservationTest verifies clean toggle without leaks"
   }
 ]
