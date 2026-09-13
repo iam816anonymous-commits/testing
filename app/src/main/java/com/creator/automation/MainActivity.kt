@@ -417,6 +417,8 @@ fun DiagnosticControlCenter(context: Context) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var statusText by remember { mutableStateOf("Ready") }
 
+    var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
+
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
 
@@ -530,6 +532,58 @@ fun DiagnosticControlCenter(context: Context) {
                 Text("Active Package: ${diagnosticState.activePackage}", fontSize = 10.sp)
                 Text("Root Window: available=${diagnosticState.rootAvailable} | class=${diagnosticState.rootNodeClass} | children=${diagnosticState.rootNodeChildCount}", fontSize = 10.sp)
                 Text("Observation Time: ${diagnosticState.observationTimestamp} | Disconnected: ${diagnosticState.serviceDisconnected} (${diagnosticState.disconnectTimestamp})", fontSize = 10.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 2 Screen Observation & Perception Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE1F5FE))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 2 SCREEN OBSERVATION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFF0277BD)
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val root = service?.getRootNode()
+                            currentSnapshot = ActionResolver.captureSnapshot(root, service?.packageName ?: "")
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("REFRESH OBSERVATION", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                val snap = currentSnapshot
+                if (snap == null) {
+                    Text("No screen observation captured yet. Tap REFRESH OBSERVATION.", fontSize = 10.sp, color = Color.Gray)
+                } else {
+                    Text("Package: ${snap.packageName} | Root Available: ${snap.isRootAvailable}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Nodes: total=${snap.totalNodeCount} | text=${snap.textNodeCount} | clickable=${snap.clickableNodeCount} | editable=${snap.editableNodeCount} | scrollable=${snap.scrollableNodeCount} | focused=${snap.focusedNodeCount}", fontSize = 10.sp)
+                    Text("Traversal Duration: ${snap.traversalDurationMs} ms | Timestamp: ${snap.timestamp}", fontSize = 10.sp)
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Observed UI Elements (Top 10):", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF01579B))
+                    snap.allNodes.take(10).forEachIndexed { idx, node ->
+                        Text(
+                            text = "${idx + 1}. [${node.className?.substringAfterLast('.') ?: "View"}] text=\"${node.text ?: ""}\" desc=\"${node.contentDescription ?: ""}\" editable=${node.isEditable} clickable=${node.isClickable} bounds=${node.boundsInScreen ?: "[]"}",
+                            fontSize = 9.sp
+                        )
+                    }
+                }
             }
         }
 
