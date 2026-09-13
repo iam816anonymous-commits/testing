@@ -1,65 +1,56 @@
 [
   {
-    "testId": "L2-X01",
-    "testName": "CreatorAutomation -> Home",
-    "category": "CROSS_APP_OBSERVATION",
+    "testId": "L2-OBS-01",
+    "testName": "YouTube Idle Observation Refresh",
+    "category": "ON_DEMAND_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "foregroundPackage updates to launcher package on Home press",
-    "preconditions": "Start cross-app observation and press Home on TECNO IN6",
-    "evidence": "Robolectric environment lacks system launcher IPC transition"
+    "physicalRequirement": "refreshCurrentScreenObservation() captures YouTube package and node tree while phone is idle",
+    "preconditions": "Open YouTube on TECNO IN6 and stop touching screen",
+    "evidence": "Robolectric environment lacks active YouTube system window"
   },
   {
-    "testId": "L2-X02",
-    "testName": "Open Chrome Manually",
-    "category": "CROSS_APP_OBSERVATION",
+    "testId": "L2-OBS-02",
+    "testName": "Chrome Idle Observation Refresh",
+    "category": "ON_DEMAND_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "foregroundPackage = com.android.chrome while CA is backgrounded",
-    "preconditions": "Launch Chrome from Home on TECNO IN6",
-    "evidence": "Requires live Chrome window accessibility events"
+    "physicalRequirement": "refreshCurrentScreenObservation() captures Chrome package and node tree while phone is idle",
+    "preconditions": "Open Chrome on TECNO IN6 and stop touching screen",
+    "evidence": "Requires live Chrome window accessibility tree"
   },
   {
-    "testId": "L2-X03",
-    "testName": "Change Chrome Screen",
-    "category": "CROSS_APP_OBSERVATION",
+    "testId": "L2-OBS-03",
+    "testName": "Settings Idle Observation Refresh",
+    "category": "ON_DEMAND_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "eventCount increases and timestamp updates when navigating Chrome",
-    "preconditions": "Navigate in Chrome on TECNO IN6",
-    "evidence": "Requires live AccessibilityEvent delivery from Chrome"
+    "physicalRequirement": "refreshCurrentScreenObservation() captures Settings package and node tree while phone is idle",
+    "preconditions": "Open Settings on TECNO IN6 and stop touching screen",
+    "evidence": "Requires live Settings window accessibility tree"
   },
   {
-    "testId": "L2-X04",
-    "testName": "YouTube Cross-App Observation",
-    "category": "CROSS_APP_OBSERVATION",
+    "testId": "L2-OBS-04",
+    "testName": "Screen Transition Observation Update",
+    "category": "ON_DEMAND_OBSERVATION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "foregroundPackage = com.google.android.youtube with node tree captured",
-    "preconditions": "Open YouTube on TECNO IN6",
-    "evidence": "Requires live YouTube window accessibility events"
+    "physicalRequirement": "State signature and timestamp update across manual screen transitions",
+    "preconditions": "User navigates between apps on device",
+    "evidence": "Signature comparison logic verified in unit tests"
   },
   {
-    "testId": "L2-X05",
-    "testName": "Settings Cross-App Observation",
-    "category": "CROSS_APP_OBSERVATION",
+    "testId": "L2-OBS-05",
+    "testName": "On-Demand MediaProjection Capture",
+    "category": "VISUAL_PERCEPTION_FALLBACK",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "foregroundPackage = com.android.settings with node tree captured",
-    "preconditions": "Open Settings on TECNO IN6",
-    "evidence": "Requires live Settings window accessibility events"
+    "physicalRequirement": "CAPTURE SCREENSHOT retrieves current frame dimensions and visual signature",
+    "preconditions": "MediaProjection granted on TECNO IN6",
+    "evidence": "MediaProjection lifecycle verified in ScreenObservationProvider"
   },
   {
-    "testId": "L2-X06",
-    "testName": "Return to CreatorAutomation",
-    "category": "CROSS_APP_OBSERVATION",
+    "testId": "L2-OBS-06",
+    "testName": "Idle SystemUI Stale State Prevention",
+    "category": "PACKAGE_RESOLUTION",
     "headlessStatus": "BLOCKED",
-    "physicalRequirement": "foregroundPackage switches back to com.creator.automation cleanly",
-    "preconditions": "Bring CreatorAutomation back to foreground on TECNO IN6",
-    "evidence": "Requires window state change event to com.creator.automation"
-  },
-  {
-    "testId": "L2-X07",
-    "testName": "Overlay Lifecycle",
-    "category": "OVERLAY_LIFECYCLE",
-    "headlessStatus": "PASS",
-    "physicalRequirement": "Attach and remove TYPE_ACCESSIBILITY_OVERLAY float view cleanly without duplicate views",
-    "preconditions": "Toggle setCrossAppObservationActive(true) then setCrossAppObservationActive(false)",
-    "evidence": "CrossAppObservationTest verifies clean toggle without leaks"
+    "physicalRequirement": "Idle screen maintains actual foreground app package rather than reverting to SystemUI",
+    "preconditions": "Leave target app in foreground for > 5 seconds",
+    "evidence": "resolveCurrentForegroundPackage uses live root package over stale event package"
   }
 ]

@@ -1,10 +1,10 @@
-# CreatorAutomation — Layer 2 Cross-App Observation Known Failures & Limitations
+# CreatorAutomation — Layer 2 Observation Upgrade Known Failures & Limitations
 
 ## HEADLESS / UNIT TEST LIMITATIONS
 
-1. **Cross-App Window Events in Headless Environments**
-   - Robolectric unit tests do not execute live multi-process Android system window switching.
-   - Physical tests L2-X01 through L2-X06 are classified as `BLOCKED` in headless environments to avoid false PASS reports.
+1. **System Window State in Headless Environment**
+   - Robolectric unit test environments do not run a multi-process Android system window manager.
+   - Tests L2-OBS-01 through L2-OBS-06 require live TECNO IN6 execution and are marked `BLOCKED` in headless mode to maintain zero false-positive claims.
 
-2. **Overlay View Window Manager Permissions in Headless Mocking**
-   - Test L2-X07 verifies overlay toggle state logic directly in `CrossAppObservationTest.kt`.
+2. **SystemUI Stale Event Resolution**
+   - In physical runtime, `SystemUI` accessibility events (e.g. status bar / navigation bar redraws) occur periodically while the device is idle. `resolveCurrentForegroundPackage()` resolves the active application window/root package rather than storing `com.android.systemui`, fixing the idle observation stale state.

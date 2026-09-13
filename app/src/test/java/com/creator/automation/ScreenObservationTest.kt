@@ -4,14 +4,21 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [27])
 class ScreenObservationTest {
+
+    @Before
+    fun setUp() {
+        AutomationAccessibilityService.resetDiagnosticsForTesting()
+    }
 
     @Test
     fun testNullRootHandling() {
@@ -87,5 +94,28 @@ class ScreenObservationTest {
         assertNotNull(sigA)
         assertNotNull(sigB)
         assertTrue("Different visible texts should generate different state signatures", sigA != sigB)
+    }
+
+    @Test
+    fun testResolveCurrentForegroundPackagePriority() {
+        val service = AutomationAccessibilityService()
+        val pkgNull = service.resolveCurrentForegroundPackage(null)
+        assertEquals("unknown", pkgNull)
+    }
+
+    @Test
+    fun testExplicitRefreshCurrentScreenObservation() {
+        val service = AutomationAccessibilityService()
+        val snapshot = service.refreshCurrentScreenObservation()
+        assertNotNull(snapshot)
+        assertFalse("Root is null in robolectric so isRootAvailable is false", snapshot.isRootAvailable)
+        assertTrue("Timestamp should be fresh", snapshot.timestamp > 0)
+    }
+
+    @Test
+    fun testScreenObservationProviderUnauthorizedState() {
+        val context = RuntimeEnvironment.getApplication()
+        val provider = ScreenObservationProvider(context)
+        assertEquals(ObservationSource.SCREEN, provider.getSource())
     }
 }

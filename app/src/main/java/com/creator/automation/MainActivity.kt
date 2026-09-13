@@ -419,6 +419,7 @@ fun DiagnosticControlCenter(context: Context) {
     var statusText by remember { mutableStateOf("Ready") }
 
     var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
+    var lastScreenObservationResult by remember { mutableStateOf<CurrentObservation?>(null) }
 
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
@@ -555,22 +556,37 @@ fun DiagnosticControlCenter(context: Context) {
                         fontSize = 11.sp,
                         color = Color(0xFF0277BD)
                     )
-                    Button(
-                        onClick = {
-                            val service = AutomationAccessibilityService.instance
-                            val root = service?.getRootNode()
-                            currentSnapshot = ActionResolver.captureSnapshot(root, service?.packageName ?: "")
-                        },
-                        shape = RoundedCornerShape(6.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text("REFRESH OBSERVATION", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(
+                            onClick = {
+                                val service = AutomationAccessibilityService.instance
+                                currentSnapshot = service?.refreshCurrentScreenObservation()
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("REFRESH CURRENT SCREEN", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val provider = ScreenObservationProvider(context)
+                                    lastScreenObservationResult = provider.captureObservation()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("CAPTURE SCREENSHOT", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 val snap = currentSnapshot
                 if (snap == null) {
-                    Text("No screen observation captured yet. Tap REFRESH OBSERVATION.", fontSize = 10.sp, color = Color.Gray)
+                    Text("No screen observation captured yet. Tap REFRESH CURRENT SCREEN.", fontSize = 10.sp, color = Color.Gray)
                 } else {
                     Text("Package: ${snap.packageName} | Root Available: ${snap.isRootAvailable}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Text("Nodes: total=${snap.totalNodeCount} | text=${snap.textNodeCount} | clickable=${snap.clickableNodeCount} | editable=${snap.editableNodeCount} | scrollable=${snap.scrollableNodeCount} | focused=${snap.focusedNodeCount}", fontSize = 10.sp)
@@ -584,6 +600,13 @@ fun DiagnosticControlCenter(context: Context) {
                             fontSize = 9.sp
                         )
                     }
+                }
+
+                if (lastScreenObservationResult != null) {
+                    val obs = lastScreenObservationResult!!
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("MediaProjection Diagnostic:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00695C))
+                    Text("Status: ${obs.stateSignature} | Dim: ${obs.width}x${obs.height} | Change: ${obs.visualChangeState}", fontSize = 10.sp)
                 }
             }
         }

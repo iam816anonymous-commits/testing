@@ -2,7 +2,9 @@
   "device": "TECNO IN6",
   "androidVersion": "8.1.0",
   "apiLevel": 27,
-  "crossAppObservationSupported": true,
-  "overlayWindowType": "TYPE_ACCESSIBILITY_OVERLAY",
-  "zeroPollutionFilterActive": true
+  "layer2ObservationUpgradeState": {
+    "onDemandRefreshActive": true,
+    "resolveForegroundPackageStrategy": "ROOT_FIRST",
+    "idleSystemUiStalePrevention": "RESOLVED"
+  }
 }

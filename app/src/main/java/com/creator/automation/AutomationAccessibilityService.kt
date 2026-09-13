@@ -15,6 +15,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlinx.coroutines.CoroutineScope
@@ -220,6 +221,80 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Resolves the true currently visible foreground package name.
+     * Evaluates live root, application windows, or last non-SystemUI event package.
+     */
+    fun resolveCurrentForegroundPackage(root: AccessibilityNodeInfo?): String {
+        val rootPkg = root?.packageName?.toString()
+        if (!rootPkg.isNullOrBlank() && rootPkg != "com.android.systemui") {
+            return rootPkg
+        }
+
+        // Search active application windows if root is null or SystemUI
+        try {
+            val appWindow = windows?.firstOrNull {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName != null
+            }
+            val appPkg = appWindow?.root?.packageName?.toString()
+            if (!appPkg.isNullOrBlank() && appPkg != "com.android.systemui") {
+                return appPkg
+            }
+        } catch (e: Exception) {
+            // Window access might be restricted or unsupported on mock
+        }
+
+        if (!rootPkg.isNullOrBlank()) {
+            return rootPkg
+        }
+
+        val lastPkg = _activePackageName.value
+        if (!lastPkg.isNullOrBlank()) {
+            return lastPkg
+        }
+
+        return "unknown"
+    }
+
+    /**
+     * Obtains an explicit, fresh, structured UI snapshot of the currently visible screen on demand,
+     * independent of whether a new accessibility event has arrived.
+     */
+    fun refreshCurrentScreenObservation(): UiSnapshot {
+        val root = rootInActiveWindow
+        val resolvedPkg = resolveCurrentForegroundPackage(root)
+        val snapshot = ActionResolver.captureSnapshot(root, resolvedPkg)
+        val now = System.currentTimeMillis()
+
+        _diagnosticState.value = _diagnosticState.value.copy(
+            activePackage = snapshot.packageName,
+            rootAvailable = snapshot.isRootAvailable,
+            rootNodeClass = root?.className?.toString() ?: "unknown",
+            rootNodeChildCount = root?.childCount ?: 0,
+            observationTimestamp = now
+        )
+
+        val crossApp = _crossAppObservationState.value
+        if (crossApp.observationActive) {
+            val updatedCrossApp = crossApp.copy(
+                foregroundPackage = snapshot.packageName,
+                rootAvailable = snapshot.isRootAvailable,
+                nodeCount = snapshot.totalNodeCount,
+                textNodeCount = snapshot.textNodeCount,
+                clickableCount = snapshot.clickableNodeCount,
+                editableCount = snapshot.editableNodeCount,
+                scrollableCount = snapshot.scrollableNodeCount,
+                focusedCount = snapshot.focusedNodeCount,
+                observationTimestamp = now
+            )
+            _crossAppObservationState.value = updatedCrossApp
+            updateDiagnosticOverlayText(updatedCrossApp)
+        }
+
+        Log.i(TAG, "REFRESH_SCREEN_OBSERVATION: pkg=${snapshot.packageName}, nodes=${snapshot.totalNodeCount}, root=${snapshot.isRootAvailable}")
+        return snapshot
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
@@ -230,7 +305,7 @@ class AutomationAccessibilityService : AccessibilityService() {
         _lastEventTimestamp.value = now
         _lastAccessibilityEvent.value = "$eventTypeName ($pkg)"
 
-        if (pkg.isNotBlank() && pkg != "com.creator.automation" && pkg != "unknown") {
+        if (pkg.isNotBlank() && pkg != "com.creator.automation" && pkg != "com.android.systemui" && pkg != "unknown") {
             _activePackageName.value = pkg
             Log.d(TAG, "PACKAGE_CHANGED: $pkg (event: $eventTypeName)")
         }
@@ -238,12 +313,13 @@ class AutomationAccessibilityService : AccessibilityService() {
         val currentDiag = _diagnosticState.value
         val root = rootInActiveWindow
         val hasRoot = root != null
+        val resolvedPkg = resolveCurrentForegroundPackage(root)
 
         _diagnosticState.value = currentDiag.copy(
             lastEventTimestamp = now,
             lastEventType = eventTypeName,
             eventCount = currentDiag.eventCount + 1,
-            activePackage = if (pkg.isNotBlank() && pkg != "com.creator.automation") pkg else currentDiag.activePackage,
+            activePackage = resolvedPkg,
             rootAvailable = hasRoot,
             rootNodeClass = root?.className?.toString() ?: "unknown",
             rootNodeChildCount = root?.childCount ?: 0,
@@ -252,9 +328,9 @@ class AutomationAccessibilityService : AccessibilityService() {
 
         val crossApp = _crossAppObservationState.value
         if (crossApp.observationActive) {
-            val snapshot = ActionResolver.captureSnapshot(root, pkg)
+            val snapshot = ActionResolver.captureSnapshot(root, resolvedPkg)
             val updatedCrossApp = crossApp.copy(
-                foregroundPackage = if (pkg.isNotBlank()) pkg else crossApp.foregroundPackage,
+                foregroundPackage = resolvedPkg,
                 foregroundClass = event.className?.toString() ?: crossApp.foregroundClass,
                 rootAvailable = snapshot.isRootAvailable,
                 nodeCount = snapshot.totalNodeCount,
