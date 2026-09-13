@@ -2,6 +2,30 @@ package com.creator.automation
 
 import java.util.UUID
 
+data class TargetRequest(
+    val requestedText: String? = null,
+    val requestedContentDescription: String? = null,
+    val requestedViewId: String? = null,
+    val requestedRole: String? = null
+)
+
+data class TargetCandidate(
+    val node: UiNodeInfo,
+    val text: String? = node.text,
+    val contentDescription: String? = node.contentDescription,
+    val viewId: String? = node.viewIdResourceName,
+    val className: String? = node.className,
+    val isClickable: Boolean = node.isClickable,
+    val isEditable: Boolean = node.isEditable,
+    val isScrollable: Boolean = node.isScrollable,
+    val isFocused: Boolean = node.isFocused,
+    val isEnabled: Boolean = node.isEnabled,
+    val isVisibleToUser: Boolean = node.isVisibleToUser,
+    val bounds: String? = node.boundsInScreen,
+    val matchType: String = "UNKNOWN",
+    val score: Double = 0.0
+)
+
 data class UiSnapshot(
     val id: String = UUID.randomUUID().toString(),
     val packageName: String,

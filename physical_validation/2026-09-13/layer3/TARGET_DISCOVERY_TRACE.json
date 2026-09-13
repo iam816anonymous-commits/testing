@@ -1,0 +1,15 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "layer3TargetDiscovery": {
+    "readOnlyDiscoveryActive": true,
+    "actionDispatched": false,
+    "targetRequest": "Search",
+    "status": "FOUND_UNIQUE",
+    "candidateCount": 1,
+    "matchMethod": "VIEW_ID",
+    "matchedViewId": "com.google.android.youtube:id/search_button",
+    "bounds": "[540,80][640,140]"
+  }
+}

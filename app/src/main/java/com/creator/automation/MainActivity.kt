@@ -421,6 +421,9 @@ fun DiagnosticControlCenter(context: Context) {
     var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
     var lastScreenObservationResult by remember { mutableStateOf<CurrentObservation?>(null) }
 
+    var targetQueryText by remember { mutableStateOf("Search") }
+    var targetResolutionResult by remember { mutableStateOf<TargetResolutionResult?>(null) }
+
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
 
@@ -655,6 +658,69 @@ fun DiagnosticControlCenter(context: Context) {
                 Text("Nodes: total=${crossAppObservationState.nodeCount} | text=${crossAppObservationState.textNodeCount} | clickable=${crossAppObservationState.clickableCount} | editable=${crossAppObservationState.editableCount} | scrollable=${crossAppObservationState.scrollableCount}", fontSize = 10.sp)
                 Text("Events: count=${crossAppObservationState.eventCount} | type=${crossAppObservationState.lastEventType}", fontSize = 10.sp)
                 Text("Observation Timestamp: ${crossAppObservationState.observationTimestamp}", fontSize = 10.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 3 Target Discovery Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    text = "LAYER 3 TARGET DISCOVERY (READ-ONLY)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = Color(0xFFF57F17)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = targetQueryText,
+                        onValueChange = { targetQueryText = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Target Request", fontSize = 10.sp) },
+                        maxLines = 1
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val snap = currentSnapshot ?: service?.refreshCurrentScreenObservation()
+                            if (snap != null && targetQueryText.isNotBlank()) {
+                                val resolver = ActionResolver()
+                                val req = TargetRequest(requestedText = targetQueryText.trim())
+                                targetResolutionResult = resolver.discoverTarget(snap, req)
+                            }
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("DISCOVER TARGET", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                val targetRes = targetResolutionResult
+                if (targetRes == null) {
+                    Text("No target discovery executed yet. Enter target text and tap DISCOVER TARGET.", fontSize = 10.sp, color = Color.Gray)
+                } else {
+                    Text("Status: ${targetRes.status.name} | Candidates: ${targetRes.candidateCount} | Ambiguous: ${targetRes.isAmbiguous}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Explanation: ${targetRes.explanation}", fontSize = 10.sp)
+                    if (targetRes.match != null) {
+                        val m = targetRes.match
+                        Text("Matched Node: text=\"${m.node.text ?: ""}\" class=${m.node.className?.substringAfterLast('.')} bounds=${m.node.boundsInScreen}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                        Text("Match Method: ${m.matchMethod} | Confidence: ${m.confidence} | Reason: ${m.reason}", fontSize = 10.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text("Note: Read-only target discovery mode. NO ACTION DISPATCHED.", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD84315))
             }
         }
 

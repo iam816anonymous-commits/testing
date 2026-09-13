@@ -186,6 +186,51 @@ class ActionResolver {
         return resolveTargetWithAmbiguity(snapshot, target).match
     }
 
+    /**
+     * Read-only Layer 3 Target Discovery: resolves a TargetRequest against a UiSnapshot without triggering any physical action.
+     */
+    fun discoverTarget(snapshot: UiSnapshot, request: TargetRequest): TargetResolutionResult {
+        if (!request.requestedViewId.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, request.requestedViewId)
+            if (res.match != null) return res
+        }
+        if (!request.requestedText.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, request.requestedText)
+            if (res.match != null) return res
+        }
+        if (!request.requestedContentDescription.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, request.requestedContentDescription)
+            if (res.match != null) return res
+        }
+        if (!request.requestedRole.isNullOrBlank()) {
+            val roleMatches = snapshot.allNodes.filter { it.className?.contains(request.requestedRole, ignoreCase = true) == true }
+            if (roleMatches.isNotEmpty()) {
+                val isAmbiguous = roleMatches.size > 1
+                val best = roleMatches.first()
+                return TargetResolutionResult(
+                    match = ResolutionMatch(
+                        node = best,
+                        matchMethod = "ROLE_CLASS",
+                        confidence = if (isAmbiguous) 0.50 else 0.75,
+                        reason = "Matched class role '${request.requestedRole}'"
+                    ),
+                    candidateCount = roleMatches.size,
+                    isAmbiguous = isAmbiguous,
+                    status = if (isAmbiguous) TargetResolutionStatus.AMBIGUOUS else TargetResolutionStatus.FOUND_UNIQUE,
+                    explanation = if (isAmbiguous) "Multiple candidates (${roleMatches.size}) matched role '${request.requestedRole}'" else "Resolved role '${request.requestedRole}'"
+                )
+            }
+        }
+
+        return TargetResolutionResult(
+            match = null,
+            candidateCount = 0,
+            isAmbiguous = false,
+            status = TargetResolutionStatus.NOT_FOUND,
+            explanation = "Target request not found in UI snapshot"
+        )
+    }
+
     fun resolveTargetWithAmbiguity(snapshot: UiSnapshot, target: String): TargetResolutionResult {
         if (target.isBlank()) {
             return TargetResolutionResult(

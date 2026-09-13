@@ -65,6 +65,8 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "AutomationAccService"
+        private const val AGENT_PACKAGE_NAME = "com.creator.automation"
+        private const val OVERLAY_UPDATE_THROTTLE_MS = 300L
 
         private val _isServiceEnabled = MutableStateFlow(false)
         val isServiceEnabled: StateFlow<Boolean> = _isServiceEnabled.asStateFlow()
@@ -112,6 +114,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
     private var overlayTextView: TextView? = null
+    private var lastOverlayUpdateTimestamp: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -162,7 +165,8 @@ class AutomationAccessibilityService : AccessibilityService() {
                 }
                 flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 format = PixelFormat.TRANSLUCENT
                 width = WindowManager.LayoutParams.WRAP_CONTENT
                 height = WindowManager.LayoutParams.WRAP_CONTENT
@@ -210,6 +214,12 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     private fun updateDiagnosticOverlayText(state: CrossAppObservationState) {
         if (overlayTextView == null) return
+        val now = System.currentTimeMillis()
+        if (now - lastOverlayUpdateTimestamp < OVERLAY_UPDATE_THROTTLE_MS) {
+            return
+        }
+        lastOverlayUpdateTimestamp = now
+
         mainHandler.post {
             overlayTextView?.text = "CA CROSS-APP OBSERVATION\n" +
                     "App: ${state.foregroundPackage}\n" +
@@ -227,24 +237,27 @@ class AutomationAccessibilityService : AccessibilityService() {
      */
     fun resolveCurrentForegroundPackage(root: AccessibilityNodeInfo?): String {
         val rootPkg = root?.packageName?.toString()
-        if (!rootPkg.isNullOrBlank() && rootPkg != "com.android.systemui") {
+        if (!rootPkg.isNullOrBlank() && rootPkg != "com.android.systemui" && rootPkg != AGENT_PACKAGE_NAME) {
             return rootPkg
         }
 
-        // Search active application windows if root is null or SystemUI
+        // Search active application windows if root is null, SystemUI, or Agent Overlay
         try {
             val appWindow = windows?.firstOrNull {
-                it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName != null
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                        it.root?.packageName != null &&
+                        it.root?.packageName != "com.android.systemui" &&
+                        it.root?.packageName != AGENT_PACKAGE_NAME
             }
             val appPkg = appWindow?.root?.packageName?.toString()
-            if (!appPkg.isNullOrBlank() && appPkg != "com.android.systemui") {
+            if (!appPkg.isNullOrBlank()) {
                 return appPkg
             }
         } catch (e: Exception) {
             // Window access might be restricted or unsupported on mock
         }
 
-        if (!rootPkg.isNullOrBlank()) {
+        if (!rootPkg.isNullOrBlank() && rootPkg != AGENT_PACKAGE_NAME) {
             return rootPkg
         }
 
@@ -305,7 +318,12 @@ class AutomationAccessibilityService : AccessibilityService() {
         _lastEventTimestamp.value = now
         _lastAccessibilityEvent.value = "$eventTypeName ($pkg)"
 
-        if (pkg.isNotBlank() && pkg != "com.creator.automation" && pkg != "com.android.systemui" && pkg != "unknown") {
+        // Break overlay feedback loop: ignore events caused by agent overlay itself
+        if (pkg == AGENT_PACKAGE_NAME) {
+            return
+        }
+
+        if (pkg.isNotBlank() && pkg != "com.android.systemui" && pkg != "unknown") {
             _activePackageName.value = pkg
             Log.d(TAG, "PACKAGE_CHANGED: $pkg (event: $eventTypeName)")
         }
