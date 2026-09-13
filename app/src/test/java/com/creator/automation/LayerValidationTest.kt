@@ -167,4 +167,42 @@ class LayerValidationTest {
         assertEquals("LOCKED", status.l8Submit)
         assertEquals("LOCKED", status.l9Navigation)
     }
+
+    @Test
+    fun testOverlayMenuNavigationAndCollapseState() {
+        assertFalse(LayerValidationController.isOverlayExpanded.value)
+        assertEquals(OverlayMenuView.MAIN_MENU, LayerValidationController.currentMenuView.value)
+
+        LayerValidationController.setOverlayExpanded(true)
+        assertTrue(LayerValidationController.isOverlayExpanded.value)
+
+        LayerValidationController.navigateMenuView(OverlayMenuView.L3_TARGET)
+        assertEquals(OverlayMenuView.L3_TARGET, LayerValidationController.currentMenuView.value)
+
+        LayerValidationController.navigateMenuView(OverlayMenuView.L4_TOUCH)
+        assertEquals(OverlayMenuView.L4_TOUCH, LayerValidationController.currentMenuView.value)
+
+        // Collapsing resets menu view to MAIN_MENU
+        LayerValidationController.setOverlayExpanded(false)
+        assertFalse(LayerValidationController.isOverlayExpanded.value)
+        assertEquals(OverlayMenuView.MAIN_MENU, LayerValidationController.currentMenuView.value)
+    }
+
+    @Test
+    fun testL3ToL4TargetRetentionFlow() {
+        val snap = createSampleSnapshot(packageName = "com.google.android.youtube", text = "Search")
+        val candidate = TargetCandidate(node = snap.allNodes.first(), matchType = "EXACT_TEXT", score = 0.95)
+
+        LayerValidationController.navigateMenuView(OverlayMenuView.L3_TARGET)
+        controller.selectAndRetainTarget(candidate, "Search", snap)
+
+        val retained = LayerValidationController.retainedTarget.value
+        assertNotNull(retained)
+        assertEquals("Search", retained?.candidate?.text)
+
+        // Seamless transition to L4 Touch
+        LayerValidationController.navigateMenuView(OverlayMenuView.L4_TOUCH)
+        assertEquals(OverlayMenuView.L4_TOUCH, LayerValidationController.currentMenuView.value)
+        assertEquals(ValidationTargetStatus.READY, retained?.status)
+    }
 }

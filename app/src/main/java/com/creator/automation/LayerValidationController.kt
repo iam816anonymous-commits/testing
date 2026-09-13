@@ -12,6 +12,15 @@ enum class ValidationTargetStatus {
     STALE
 }
 
+enum class OverlayMenuView {
+    MAIN_MENU,
+    L3_TARGET,
+    L4_TOUCH,
+    L5_SCROLL,
+    DETAILS,
+    TRACE
+}
+
 data class RetainedTarget(
     val candidate: TargetCandidate,
     val sourceQuery: String,
@@ -72,6 +81,15 @@ class LayerValidationController(
         private val _selectedScrollDirection = MutableStateFlow("DOWN") // "DOWN" or "UP"
         val selectedScrollDirection: StateFlow<String> = _selectedScrollDirection.asStateFlow()
 
+        private val _isOverlayExpanded = MutableStateFlow(false)
+        val isOverlayExpanded: StateFlow<Boolean> = _isOverlayExpanded.asStateFlow()
+
+        private val _currentMenuView = MutableStateFlow(OverlayMenuView.MAIN_MENU)
+        val currentMenuView: StateFlow<OverlayMenuView> = _currentMenuView.asStateFlow()
+
+        private val _activeSearchQuery = MutableStateFlow("Search")
+        val activeSearchQuery: StateFlow<String> = _activeSearchQuery.asStateFlow()
+
         var instance: LayerValidationController? = null
             private set
 
@@ -82,11 +100,29 @@ class LayerValidationController(
             return instance!!
         }
 
+        fun setOverlayExpanded(expanded: Boolean) {
+            _isOverlayExpanded.value = expanded
+            if (!expanded) {
+                _currentMenuView.value = OverlayMenuView.MAIN_MENU
+            }
+        }
+
+        fun navigateMenuView(view: OverlayMenuView) {
+            _currentMenuView.value = view
+        }
+
+        fun setActiveSearchQuery(query: String) {
+            _activeSearchQuery.value = query
+        }
+
         fun resetForTesting() {
             _retainedTarget.value = null
             _lastValidationTrace.value = null
             _selectedScrollIndex.value = 0
             _selectedScrollDirection.value = "DOWN"
+            _isOverlayExpanded.value = false
+            _currentMenuView.value = OverlayMenuView.MAIN_MENU
+            _activeSearchQuery.value = "Search"
             _layerStatus.value = ValidationLayerStatus()
             instance = null
         }

@@ -114,6 +114,7 @@ class AutomationAccessibilityService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
     private var overlayTextView: TextView? = null
+    private var overlayContainerView: LinearLayout? = null
     private var lastOverlayUpdateTimestamp: Long = 0L
 
     override fun onCreate() {
@@ -164,7 +165,6 @@ class AutomationAccessibilityService : AccessibilityService() {
                     WindowManager.LayoutParams.TYPE_PHONE
                 }
                 flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 format = PixelFormat.TRANSLUCENT
@@ -177,19 +177,14 @@ class AutomationAccessibilityService : AccessibilityService() {
 
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.argb(230, 15, 23, 42))
-                setPadding(16, 12, 16, 12)
+                setBackgroundColor(Color.argb(240, 15, 23, 42))
+                setPadding(14, 10, 14, 10)
             }
 
-            val tv = TextView(this).apply {
-                setTextColor(Color.GREEN)
-                textSize = 9f
-                text = "CREATOR AGENT DIAGNOSTIC\nLayer 1: ACTIVE\nLayer 2: ACTIVE\nLayer 3: ACTIVE\nLayer 4-9: LOCKED\nApp: unknown"
-            }
-
-            container.addView(tv)
             overlayView = container
-            overlayTextView = tv
+            overlayContainerView = container
+
+            renderOverlayContent()
 
             windowManager?.addView(overlayView, layoutParams)
             Log.i(TAG, "DIAGNOSTIC_OVERLAY_SHOW")
@@ -213,36 +208,318 @@ class AutomationAccessibilityService : AccessibilityService() {
     }
 
     private fun updateDiagnosticOverlayText(state: CrossAppObservationState) {
-        if (overlayTextView == null) return
         val now = System.currentTimeMillis()
         if (now - lastOverlayUpdateTimestamp < OVERLAY_UPDATE_THROTTLE_MS) {
             return
         }
         lastOverlayUpdateTimestamp = now
 
+        mainHandler.post {
+            renderOverlayContent()
+        }
+    }
+
+    private fun renderOverlayContent() {
+        val container = overlayContainerView ?: return
+        container.removeAllViews()
+
+        val state = _crossAppObservationState.value
+        val expanded = LayerValidationController.isOverlayExpanded.value
+        val menuView = LayerValidationController.currentMenuView.value
         val retained = LayerValidationController.retainedTarget.value
         val trace = LayerValidationController.lastValidationTrace.value
-        val targetStatusStr = when {
-            retained == null -> "NONE"
-            retained.status == ValidationTargetStatus.STALE -> "STALE"
-            else -> retained.candidate.text ?: retained.sourceQuery
+
+        if (!expanded) {
+            val targetStatusStr = when {
+                retained == null -> ""
+                retained.status == ValidationTargetStatus.STALE -> " [STALE]"
+                else -> " [READY]"
+            }
+            val collapsedBtn = android.widget.Button(this).apply {
+                setTextColor(Color.GREEN)
+                textSize = 9f
+                setBackgroundColor(Color.argb(200, 15, 23, 42))
+                text = "◉ AGENT CONSOLE\n${state.foregroundPackage}$targetStatusStr"
+                setOnClickListener {
+                    LayerValidationController.setOverlayExpanded(true)
+                    renderOverlayContent()
+                }
+            }
+            container.addView(collapsedBtn)
+            return
         }
 
-        val traceStr = if (trace != null) {
-            "L${trace.layer} ${trace.actionType}: ${trace.dispatchResult} -> ${trace.verificationStatus}"
-        } else {
-            "None"
+        // Header
+        val headerTv = TextView(this).apply {
+            setTextColor(Color.GREEN)
+            textSize = 10f
+            text = "◉ CREATOR AGENT CONSOLE\nApp: ${state.foregroundPackage}"
         }
+        container.addView(headerTv)
 
-        mainHandler.post {
-            overlayTextView?.text = "CROSS-APP CONSOLE\n" +
-                    "App: ${state.foregroundPackage}\n" +
-                    "Root: ${if (state.rootAvailable) "AVAILABLE" else "UNAVAILABLE"}\n" +
-                    "Nodes: ${state.nodeCount} | Click: ${state.clickableCount}\n" +
-                    "Scroll: ${state.scrollableCount} | Edit: ${state.editableCount}\n" +
-                    "L1-L3: PASS | L4-L5: AVAILABLE\n" +
-                    "Target: $targetStatusStr\n" +
-                    "Trace: $traceStr"
+        when (menuView) {
+            OverlayMenuView.MAIN_MENU -> {
+                val l3Btn = android.widget.Button(this).apply {
+                    text = "[ L3 ] TARGET DISCOVERY"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L3_TARGET)
+                        renderOverlayContent()
+                    }
+                }
+                val l4Btn = android.widget.Button(this).apply {
+                    text = "[ L4 ] TOUCH EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L4_TOUCH)
+                        renderOverlayContent()
+                    }
+                }
+                val l5Btn = android.widget.Button(this).apply {
+                    text = "[ L5 ] SCROLL EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L5_SCROLL)
+                        renderOverlayContent()
+                    }
+                }
+
+                val statusTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    val targetLabel = retained?.candidate?.text ?: retained?.sourceQuery ?: "NONE"
+                    text = "Target: $targetLabel | Status: ${retained?.status ?: "NONE"}"
+                }
+
+                val actionRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                }
+                val refreshBtn = android.widget.Button(this).apply {
+                    text = "REFRESH"
+                    textSize = 9f
+                    setOnClickListener {
+                        refreshCurrentScreenObservation()
+                        renderOverlayContent()
+                    }
+                }
+                val collapseBtn = android.widget.Button(this).apply {
+                    text = "COLLAPSE"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.setOverlayExpanded(false)
+                        renderOverlayContent()
+                    }
+                }
+                actionRow.addView(refreshBtn)
+                actionRow.addView(collapseBtn)
+
+                container.addView(l3Btn)
+                container.addView(l4Btn)
+                container.addView(l5Btn)
+                container.addView(statusTv)
+                container.addView(actionRow)
+            }
+
+            OverlayMenuView.L3_TARGET -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.CYAN)
+                    textSize = 10f
+                    text = "L3 TARGET DISCOVERY"
+                }
+
+                val queryEt = android.widget.EditText(this).apply {
+                    hint = "Target query (e.g. Search)"
+                    textSize = 9f
+                    setTextColor(Color.WHITE)
+                    setHintTextColor(Color.GRAY)
+                    setText(LayerValidationController.activeSearchQuery.value)
+                }
+
+                val discoverBtn = android.widget.Button(this).apply {
+                    text = "DISCOVER TARGET"
+                    textSize = 9f
+                    setOnClickListener {
+                        val q = queryEt.text.toString().trim()
+                        if (q.isNotBlank()) {
+                            LayerValidationController.setActiveSearchQuery(q)
+                            val snap = refreshCurrentScreenObservation()
+                            val cand = LayerValidationController.getOrCreateInstance().discoverTargetForValidation(snap, q)
+                            if (cand != null) {
+                                LayerValidationController.getOrCreateInstance().selectAndRetainTarget(cand, q, snap)
+                            }
+                            renderOverlayContent()
+                        }
+                    }
+                }
+
+                val statusTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "FOUND: '${retained.candidate.text ?: retained.sourceQuery}' (${retained.status})" else "Status: NOT_DISCOVERED"
+                }
+
+                val useAndGoBtn = android.widget.Button(this).apply {
+                    text = "USE TARGET -> GO TO L4 TOUCH"
+                    textSize = 9f
+                    isEnabled = retained != null
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L4_TOUCH)
+                        renderOverlayContent()
+                    }
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(queryEt)
+                container.addView(discoverBtn)
+                container.addView(statusTv)
+                container.addView(useAndGoBtn)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L4_TOUCH -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L4 TOUCH VALIDATION"
+                }
+
+                val targetTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "Target: '${retained.candidate.text ?: retained.sourceQuery}' (${retained.status})" else "NO TARGET SELECTED"
+                }
+
+                val testClickBtn = android.widget.Button(this).apply {
+                    text = "TEST CLICK"
+                    textSize = 9f
+                    isEnabled = retained != null && retained.status == ValidationTargetStatus.READY
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer4TouchTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 4) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(targetTv)
+                container.addView(testClickBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L5_SCROLL -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L5 SCROLL VALIDATION"
+                }
+
+                val dirBtn = android.widget.Button(this).apply {
+                    text = "Direction: [ ${LayerValidationController.selectedScrollDirection.value} ]"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.getOrCreateInstance().toggleScrollDirection()
+                        renderOverlayContent()
+                    }
+                }
+
+                val testScrollBtn = android.widget.Button(this).apply {
+                    text = "TEST SCROLL"
+                    textSize = 9f
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer5ScrollTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 5) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(dirBtn)
+                container.addView(testScrollBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.DETAILS -> {
+                val detailsTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = "Total Nodes: ${state.nodeCount}\nClickable: ${state.clickableCount}\nScrollable: ${state.scrollableCount}\nEditable: ${state.editableCount}"
+                }
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+                container.addView(detailsTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.TRACE -> {
+                val traceTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (trace != null) "Layer: ${trace.layer}\nTarget: ${trace.targetIdentifier}\nDispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No trace recorded"
+                }
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+                container.addView(traceTv)
+                container.addView(backBtn)
+            }
         }
     }
 
