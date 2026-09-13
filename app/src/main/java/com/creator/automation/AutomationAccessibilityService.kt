@@ -220,15 +220,29 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
         lastOverlayUpdateTimestamp = now
 
+        val retained = LayerValidationController.retainedTarget.value
+        val trace = LayerValidationController.lastValidationTrace.value
+        val targetStatusStr = when {
+            retained == null -> "NONE"
+            retained.status == ValidationTargetStatus.STALE -> "STALE"
+            else -> retained.candidate.text ?: retained.sourceQuery
+        }
+
+        val traceStr = if (trace != null) {
+            "L${trace.layer} ${trace.actionType}: ${trace.dispatchResult} -> ${trace.verificationStatus}"
+        } else {
+            "None"
+        }
+
         mainHandler.post {
-            overlayTextView?.text = "CREATOR AGENT DIAGNOSTIC\n" +
+            overlayTextView?.text = "CROSS-APP CONSOLE\n" +
                     "App: ${state.foregroundPackage}\n" +
                     "Root: ${if (state.rootAvailable) "AVAILABLE" else "UNAVAILABLE"}\n" +
-                    "Nodes: ${state.nodeCount} | Text: ${state.textNodeCount}\n" +
-                    "Click: ${state.clickableCount} | Edit: ${state.editableCount}\n" +
-                    "Scroll: ${state.scrollableCount} | Focus: ${state.focusedCount}\n" +
-                    "Layer: 1-3 ACTIVE | 4-9 LOCKED\n" +
-                    "Action Dispatched: FALSE"
+                    "Nodes: ${state.nodeCount} | Click: ${state.clickableCount}\n" +
+                    "Scroll: ${state.scrollableCount} | Edit: ${state.editableCount}\n" +
+                    "L1-L3: PASS | L4-L5: AVAILABLE\n" +
+                    "Target: $targetStatusStr\n" +
+                    "Trace: $traceStr"
         }
     }
 
