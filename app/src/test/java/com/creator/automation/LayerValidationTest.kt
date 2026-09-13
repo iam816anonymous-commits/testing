@@ -205,4 +205,26 @@ class LayerValidationTest {
         assertEquals(OverlayMenuView.L4_TOUCH, LayerValidationController.currentMenuView.value)
         assertEquals(ValidationTargetStatus.READY, retained?.status)
     }
+
+    @Test
+    fun testValidationStateAndFailureReasonTaxonomy() {
+        assertEquals("NO_OBSERVATION", ValidationState.NO_OBSERVATION.name)
+        assertEquals("CONFIRMED", ValidationState.CONFIRMED.name)
+        assertEquals("NOT_CONFIRMED", ValidationState.NOT_CONFIRMED.name)
+        assertEquals("TARGET_STALE", ValidationFailureReason.TARGET_STALE.name)
+        assertEquals("SCROLL_REGION_NOT_FOUND", ValidationFailureReason.SCROLL_REGION_NOT_FOUND.name)
+    }
+
+    @Test
+    fun testDiscoverInteractionSurfacesExtraction() {
+        val snap = createSampleSnapshot(packageName = "com.example.app", text = "Search Bar", isScrollable = true)
+        val surfaces = actionResolver.discoverInteractionSurfaces(snap)
+
+        assertFalse(surfaces.isEmpty())
+        val firstSurface = surfaces.first()
+        assertEquals("Search Bar", firstSurface.text)
+        assertTrue(firstSurface.isClickable)
+        assertTrue(firstSurface.isScrollable)
+        assertEquals("ScrollView", firstSurface.role)
+    }
 }

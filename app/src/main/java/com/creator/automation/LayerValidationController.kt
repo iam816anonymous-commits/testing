@@ -253,7 +253,7 @@ class LayerValidationController(
                 afterStateSignature = beforeSig,
                 verificationStatus = "FAILED",
                 isConfirmed = false,
-                failureReason = "Selected target is STALE - screen changed since selection"
+                failureReason = ValidationFailureReason.TARGET_STALE.name
             )
             _lastValidationTrace.value = trace
             return trace

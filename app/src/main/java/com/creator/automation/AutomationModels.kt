@@ -36,6 +36,42 @@ data class MechanismAvailability(
     val actionDispatched: Boolean = false
 )
 
+data class InteractionSurface(
+    val id: String = UUID.randomUUID().toString(),
+    val index: Int = 0,
+    val text: String? = null,
+    val contentDescription: String? = null,
+    val viewId: String? = null,
+    val className: String? = null,
+    val role: String? = null,
+    val isClickable: Boolean = false,
+    val isEditable: Boolean = false,
+    val isScrollable: Boolean = false,
+    val isFocused: Boolean = false,
+    val isEnabled: Boolean = true,
+    val bounds: String? = null,
+    val parentContext: String? = null,
+    val observationId: String = "",
+    val observationTimestamp: Long = System.currentTimeMillis(),
+    val stateSignature: String = "",
+    val confidence: Double = 1.0
+)
+
+enum class ScrollAmount {
+    SMALL,
+    MEDIUM,
+    LARGE
+}
+
+data class ScrollRequest(
+    val regionIdentifier: String? = null,
+    val regionIndex: Int = 0,
+    val direction: String = "DOWN", // "DOWN" or "UP"
+    val amount: ScrollAmount = ScrollAmount.MEDIUM,
+    val observationId: String = "",
+    val stateSignature: String = ""
+)
+
 data class ScreenInteractionElement(
     val index: Int,
     val text: String?,
@@ -135,6 +171,50 @@ data class TargetBounds(
     val centerY: Int get() = (top + bottom) / 2
     val width: Int get() = right - left
     val height: Int get() = bottom - top
+}
+
+enum class ValidationState {
+    NO_OBSERVATION,
+    OBSERVING,
+    OBSERVATION_READY,
+    TARGET_NOT_FOUND,
+    TARGET_AMBIGUOUS,
+    TARGET_FOUND,
+    TARGET_SELECTED,
+    TARGET_STALE,
+    ACTION_READY,
+    ACTION_DISPATCHING,
+    ACTION_DISPATCHED,
+    VERIFYING,
+    CONFIRMED,
+    NOT_CONFIRMED,
+    FAILED,
+    CANCELLED
+}
+
+enum class ValidationFailureReason {
+    NONE,
+    SERVICE_UNAVAILABLE,
+    ROOT_UNAVAILABLE,
+    OBSERVATION_STALE,
+    OBSERVATION_TIMEOUT,
+    TARGET_NOT_FOUND,
+    TARGET_AMBIGUOUS,
+    TARGET_STALE,
+    TARGET_DISABLED,
+    TARGET_NOT_ACTIONABLE,
+    INVALID_BOUNDS,
+    CLICK_DISPATCH_FAILED,
+    CLICK_NOT_CONFIRMED,
+    SCROLL_REGION_NOT_FOUND,
+    SCROLL_REGION_AMBIGUOUS,
+    SCROLL_REGION_STALE,
+    SCROLL_ACTION_UNAVAILABLE,
+    SCROLL_DISPATCH_FAILED,
+    SCROLL_NOT_CONFIRMED,
+    OVERLAY_INTERFERENCE,
+    CANCELLED,
+    UNKNOWN
 }
 
 enum class VisualizationActionState {

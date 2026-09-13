@@ -740,21 +740,28 @@ class DeviceActionExecutor(
             scrollDispatched = scrollableNode.performAction(action)
         }
 
-        // Tier 3: Dynamic Gesture Swipe Fallback
+        // Tier 3: Dynamic Gesture Swipe Fallback - Container Region Bounded
         if (!scrollDispatched) {
             dispatchAttempt = "DYNAMIC_GESTURE_SWIPE_FALLBACK"
-            val displayMetrics = context.resources.displayMetrics
-            val screenWidth = displayMetrics.widthPixels.toFloat()
-            val screenHeight = displayMetrics.heightPixels.toFloat()
 
-            val startX = screenWidth / 2f
-            val (startY, endY) = if (forward) {
-                Pair(screenHeight * 0.75f, screenHeight * 0.25f) // Swipe UP to scroll DOWN
-            } else {
-                Pair(screenHeight * 0.25f, screenHeight * 0.75f) // Swipe DOWN to scroll UP
+            val boundsRect = android.graphics.Rect()
+            if (scrollableNode != null) {
+                scrollableNode.getBoundsInScreen(boundsRect)
             }
 
-            Log.i(TAG, "SCROLL_GESTURE_FALLBACK: Attempting gesture swipe ($startX, $startY) -> ($startX, $endY)")
+            val (startX, startY, endY) = if (boundsRect.width() > 0 && boundsRect.height() > 0) {
+                val cx = boundsRect.centerX().toFloat()
+                val topY = boundsRect.top + (boundsRect.height() * 0.2f)
+                val bottomY = boundsRect.bottom - (boundsRect.height() * 0.2f)
+                if (forward) Triple(cx, bottomY, topY) else Triple(cx, topY, bottomY)
+            } else {
+                val displayMetrics = context.resources.displayMetrics
+                val cx = displayMetrics.widthPixels / 2f
+                val h = displayMetrics.heightPixels.toFloat()
+                if (forward) Triple(cx, h * 0.75f, h * 0.25f) else Triple(cx, h * 0.25f, h * 0.75f)
+            }
+
+            Log.i(TAG, "SCROLL_GESTURE_FALLBACK: Attempting container-bounded gesture swipe ($startX, $startY) -> ($startX, $endY)")
             scrollDispatched = AndroidAutomationCompat.dispatchSwipe(service, startX, startY, startX, endY)
         }
 

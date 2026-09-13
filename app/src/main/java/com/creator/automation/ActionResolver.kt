@@ -236,30 +236,67 @@ class ActionResolver {
      * Generates a generic screen interaction map exposing all interactable UI elements on the current screen.
      */
     fun generateInteractionMap(snapshot: UiSnapshot): ScreenInteractionMap {
-        val interactiveNodes = snapshot.allNodes.filter {
-            it.isClickable || it.isEditable || it.isScrollable || !it.text.isNullOrBlank() || !it.contentDescription.isNullOrBlank()
-        }
+        val interactiveSurfaces = discoverInteractionSurfaces(snapshot)
 
-        val elements = interactiveNodes.take(30).mapIndexed { idx, node ->
+        val elements = interactiveSurfaces.take(30).mapIndexed { idx, surface ->
             ScreenInteractionElement(
                 index = idx + 1,
-                text = node.text,
-                contentDescription = node.contentDescription,
-                viewId = node.viewIdResourceName,
-                className = node.className,
-                isClickable = node.isClickable,
-                isEditable = node.isEditable,
-                isScrollable = node.isScrollable,
-                bounds = node.boundsInScreen
+                text = surface.text,
+                contentDescription = surface.contentDescription,
+                viewId = surface.viewId,
+                className = surface.className,
+                isClickable = surface.isClickable,
+                isEditable = surface.isEditable,
+                isScrollable = surface.isScrollable,
+                bounds = surface.bounds
             )
         }
 
         return ScreenInteractionMap(
             packageName = snapshot.packageName,
             totalElements = snapshot.totalNodeCount,
-            interactiveElementsCount = interactiveNodes.size,
+            interactiveElementsCount = interactiveSurfaces.size,
             elements = elements
         )
+    }
+
+    /**
+     * Extracts structured, deterministic InteractionSurfaces bound to the active UiSnapshot's state signature.
+     */
+    fun discoverInteractionSurfaces(snapshot: UiSnapshot): List<InteractionSurface> {
+        val stateSig = StateSignatureGenerator.generateSignature(snapshot)
+        val interactiveNodes = snapshot.allNodes.filter {
+            it.isClickable || it.isEditable || it.isScrollable || !it.text.isNullOrBlank() || !it.contentDescription.isNullOrBlank()
+        }
+
+        return interactiveNodes.mapIndexed { idx, node ->
+            val role = when {
+                node.isEditable -> "EditText"
+                node.isScrollable -> "ScrollView"
+                node.isClickable -> node.className?.substringAfterLast(".") ?: "Button"
+                else -> node.className?.substringAfterLast(".") ?: "TextView"
+            }
+
+            InteractionSurface(
+                index = idx + 1,
+                text = node.text,
+                contentDescription = node.contentDescription,
+                viewId = node.viewIdResourceName,
+                className = node.className,
+                role = role,
+                isClickable = node.isClickable,
+                isEditable = node.isEditable,
+                isScrollable = node.isScrollable,
+                isFocused = node.isFocused,
+                isEnabled = node.isEnabled,
+                bounds = node.boundsInScreen,
+                parentContext = node.parentClassName,
+                observationId = snapshot.id,
+                observationTimestamp = snapshot.timestamp,
+                stateSignature = stateSig,
+                confidence = if (!node.viewIdResourceName.isNullOrBlank()) 1.0 else if (!node.text.isNullOrBlank()) 0.95 else 0.75
+            )
+        }
     }
 
     /**

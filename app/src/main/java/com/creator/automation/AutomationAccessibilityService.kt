@@ -324,11 +324,23 @@ class AutomationAccessibilityService : AccessibilityService() {
                 val titleTv = TextView(this).apply {
                     setTextColor(Color.CYAN)
                     textSize = 10f
-                    text = "L3 TARGET DISCOVERY"
+                    text = "L3 INTERACTION SURFACES"
+                }
+
+                val currentSnap = refreshCurrentScreenObservation()
+                val surfaces = ActionResolver().discoverInteractionSurfaces(currentSnap)
+
+                val listTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 8.5f
+                    val topSurfaces = surfaces.take(5).mapIndexed { idx, surf ->
+                        "${idx + 1}. [${surf.role}] ${surf.text ?: surf.contentDescription ?: surf.viewId ?: "Element"}"
+                    }
+                    text = if (topSurfaces.isNotEmpty()) topSurfaces.joinToString("\n") else "No interactable surfaces found"
                 }
 
                 val queryEt = android.widget.EditText(this).apply {
-                    hint = "Target query (e.g. Search)"
+                    hint = "Or type custom target query"
                     textSize = 9f
                     setTextColor(Color.WHITE)
                     setHintTextColor(Color.GRAY)
@@ -378,6 +390,7 @@ class AutomationAccessibilityService : AccessibilityService() {
                 }
 
                 container.addView(titleTv)
+                container.addView(listTv)
                 container.addView(queryEt)
                 container.addView(discoverBtn)
                 container.addView(statusTv)
