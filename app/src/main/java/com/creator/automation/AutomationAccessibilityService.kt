@@ -177,14 +177,14 @@ class AutomationAccessibilityService : AccessibilityService() {
 
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.argb(220, 20, 20, 30))
+                setBackgroundColor(Color.argb(230, 15, 23, 42))
                 setPadding(16, 12, 16, 12)
             }
 
             val tv = TextView(this).apply {
                 setTextColor(Color.GREEN)
-                textSize = 10f
-                text = "CA DIAGNOSTIC OVERLAY\nActive: YES\nApp: unknown"
+                textSize = 9f
+                text = "CREATOR AGENT DIAGNOSTIC\nLayer 1: ACTIVE\nLayer 2: ACTIVE\nLayer 3: ACTIVE\nLayer 4-9: LOCKED\nApp: unknown"
             }
 
             container.addView(tv)
@@ -221,13 +221,14 @@ class AutomationAccessibilityService : AccessibilityService() {
         lastOverlayUpdateTimestamp = now
 
         mainHandler.post {
-            overlayTextView?.text = "CA CROSS-APP OBSERVATION\n" +
+            overlayTextView?.text = "CREATOR AGENT DIAGNOSTIC\n" +
                     "App: ${state.foregroundPackage}\n" +
-                    "Root: ${if (state.rootAvailable) "YES" else "NO"}\n" +
+                    "Root: ${if (state.rootAvailable) "AVAILABLE" else "UNAVAILABLE"}\n" +
                     "Nodes: ${state.nodeCount} | Text: ${state.textNodeCount}\n" +
                     "Click: ${state.clickableCount} | Edit: ${state.editableCount}\n" +
                     "Scroll: ${state.scrollableCount} | Focus: ${state.focusedCount}\n" +
-                    "Events: ${state.eventCount} (${state.lastEventType})"
+                    "Layer: 1-3 ACTIVE | 4-9 LOCKED\n" +
+                    "Action Dispatched: FALSE"
         }
     }
 

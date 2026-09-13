@@ -423,6 +423,9 @@ fun DiagnosticControlCenter(context: Context) {
 
     var targetQueryText by remember { mutableStateOf("Search") }
     var targetResolutionResult by remember { mutableStateOf<TargetResolutionResult?>(null) }
+    var autoDetectResult by remember { mutableStateOf<AutoDetectResult?>(null) }
+    var mechanismAvailability by remember { mutableStateOf<MechanismAvailability?>(null) }
+    var interactionMap by remember { mutableStateOf<ScreenInteractionMap?>(null) }
 
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
@@ -663,18 +666,41 @@ fun DiagnosticControlCenter(context: Context) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Layer 3 Target Discovery Card
+        // Layer 3 Target Discovery & Auto Detect Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
         ) {
             Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = "LAYER 3 TARGET DISCOVERY (READ-ONLY)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                    color = Color(0xFFF57F17)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 3 TARGET DISCOVERY (READ-ONLY)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFFF57F17)
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val snap = currentSnapshot ?: service?.refreshCurrentScreenObservation()
+                            if (snap != null) {
+                                val resolver = ActionResolver()
+                                autoDetectResult = resolver.autoDetectScreen(snap)
+                                interactionMap = resolver.generateInteractionMap(snap)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57F17)),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text("AUTO DETECT", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Row(
@@ -696,7 +722,9 @@ fun DiagnosticControlCenter(context: Context) {
                             if (snap != null && targetQueryText.isNotBlank()) {
                                 val resolver = ActionResolver()
                                 val req = TargetRequest(requestedText = targetQueryText.trim())
-                                targetResolutionResult = resolver.discoverTarget(snap, req)
+                                val res = resolver.discoverTarget(snap, req)
+                                targetResolutionResult = res
+                                mechanismAvailability = resolver.reportMechanismAvailability(res.match?.node)
                             }
                         },
                         shape = RoundedCornerShape(6.dp),
@@ -708,9 +736,7 @@ fun DiagnosticControlCenter(context: Context) {
 
                 Spacer(modifier = Modifier.height(6.dp))
                 val targetRes = targetResolutionResult
-                if (targetRes == null) {
-                    Text("No target discovery executed yet. Enter target text and tap DISCOVER TARGET.", fontSize = 10.sp, color = Color.Gray)
-                } else {
+                if (targetRes != null) {
                     Text("Status: ${targetRes.status.name} | Candidates: ${targetRes.candidateCount} | Ambiguous: ${targetRes.isAmbiguous}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Text("Explanation: ${targetRes.explanation}", fontSize = 10.sp)
                     if (targetRes.match != null) {
@@ -719,6 +745,30 @@ fun DiagnosticControlCenter(context: Context) {
                         Text("Match Method: ${m.matchMethod} | Confidence: ${m.confidence} | Reason: ${m.reason}", fontSize = 10.sp)
                     }
                 }
+
+                val mech = mechanismAvailability
+                if (mech != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Mechanism Availability Report:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                    Text("Preferred: ${mech.preferredMechanism} | Click: ${mech.accessibilityClick} | ParentClick: ${mech.clickableParent} | Gesture: ${mech.gestureFallback} | Text: ${mech.setTextCompatible}", fontSize = 9.sp)
+                }
+
+                val autoDet = autoDetectResult
+                if (autoDet != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Auto Detect Screen Summary:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00838F))
+                    Text("App: ${autoDet.packageName} | Total Nodes: ${autoDet.totalNodeCount} | Interactive: ${autoDet.interactiveCount} | Editable: ${autoDet.editableCount} | Scrollable: ${autoDet.scrollableCount}", fontSize = 9.sp)
+                }
+
+                val imap = interactionMap
+                if (imap != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Interaction Map (${imap.interactiveElementsCount} elements):", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF283593))
+                    imap.elements.take(5).forEach { el ->
+                        Text("#${el.index} [${el.className?.substringAfterLast('.')}] text=\"${el.text ?: ""}\" desc=\"${el.contentDescription ?: ""}\" bounds=${el.bounds}", fontSize = 8.sp)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(2.dp))
                 Text("Note: Read-only target discovery mode. NO ACTION DISPATCHED.", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD84315))
             }

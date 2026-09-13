@@ -26,6 +26,60 @@ data class TargetCandidate(
     val score: Double = 0.0
 )
 
+data class MechanismAvailability(
+    val accessibilityClick: Boolean = false,
+    val clickableParent: Boolean = false,
+    val gestureFallback: Boolean = false,
+    val focusAvailable: Boolean = false,
+    val setTextCompatible: Boolean = false,
+    val preferredMechanism: String = "Accessibility Click",
+    val actionDispatched: Boolean = false
+)
+
+data class ScreenInteractionElement(
+    val index: Int,
+    val text: String?,
+    val contentDescription: String?,
+    val viewId: String?,
+    val className: String?,
+    val isClickable: Boolean,
+    val isEditable: Boolean,
+    val isScrollable: Boolean,
+    val bounds: String?
+)
+
+data class ScreenInteractionMap(
+    val packageName: String,
+    val totalElements: Int,
+    val interactiveElementsCount: Int,
+    val elements: List<ScreenInteractionElement>
+)
+
+data class AutoDetectResult(
+    val packageName: String,
+    val isRootAvailable: Boolean,
+    val totalNodeCount: Int,
+    val interactiveCount: Int,
+    val editableCount: Int,
+    val scrollableCount: Int,
+    val targetDiscoveryAvailable: Boolean,
+    val visualFallbackAvailable: Boolean,
+    val actionDispatched: Boolean = false
+)
+
+data class Layer3TraceRecord(
+    val timestamp: Long = System.currentTimeMillis(),
+    val foregroundPackage: String,
+    val observationTimestamp: Long,
+    val targetRequest: String,
+    val candidateCount: Int,
+    val matchMethod: String,
+    val confidence: Double,
+    val bounds: String?,
+    val mechanisms: MechanismAvailability,
+    val actionDispatched: Boolean = false
+)
+
 data class UiSnapshot(
     val id: String = UUID.randomUUID().toString(),
     val packageName: String,

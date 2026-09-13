@@ -77,6 +77,21 @@ class TargetDiscoveryTest {
     }
 
     @Test
+    fun testDiscoverTargetGenericRoleIsAmbiguous() {
+        val node1 = UiNodeInfo(className = "android.widget.TextView", boundsInScreen = "[10,10][100,50]")
+        val snapshot = UiSnapshot(
+            packageName = "com.example.app",
+            allNodes = listOf(node1)
+        )
+
+        val req = TargetRequest(requestedRole = "TextView")
+        val res = resolver.discoverTarget(snapshot, req)
+
+        assertEquals(TargetResolutionStatus.AMBIGUOUS, res.status)
+        assertEquals(0.40, res.match?.confidence ?: 0.0, 0.01)
+    }
+
+    @Test
     fun testDiscoverTargetNotFound() {
         val node1 = UiNodeInfo(text = "Home", boundsInScreen = "[0,0][100,50]")
         val snapshot = UiSnapshot(
@@ -94,12 +109,34 @@ class TargetDiscoveryTest {
     }
 
     @Test
-    fun testDiscoverTargetReadOnlyNoActionDispatched() {
-        val node = UiNodeInfo(text = "Submit", isClickable = true)
-        val snapshot = UiSnapshot(packageName = "com.test.app", allNodes = listOf(node))
-        val req = TargetRequest(requestedText = "Submit")
+    fun testGenerateInteractionMap() {
+        val node1 = UiNodeInfo(text = "Search", isClickable = true, boundsInScreen = "[10,10][100,50]")
+        val node2 = UiNodeInfo(text = "Input", isEditable = true, boundsInScreen = "[10,60][100,100]")
+        val snapshot = UiSnapshot(packageName = "com.test.app", allNodes = listOf(node1, node2))
 
-        val res = resolver.discoverTarget(snapshot, req)
-        assertNotNull("Target discovery resolves candidate without dispatching actions", res.match)
+        val map = resolver.generateInteractionMap(snapshot)
+        assertEquals("com.test.app", map.packageName)
+        assertEquals(2, map.totalElements)
+        assertEquals(2, map.interactiveElementsCount)
+    }
+
+    @Test
+    fun testReportMechanismAvailabilityReadOnlyInvariant() {
+        val node = UiNodeInfo(text = "Submit", isClickable = true, boundsInScreen = "[0,0][10,10]")
+        val mech = resolver.reportMechanismAvailability(node)
+
+        assertTrue(mech.accessibilityClick)
+        assertTrue(mech.gestureFallback)
+        assertFalse("Layer 3 mechanism report must strictly enforce actionDispatched = false", mech.actionDispatched)
+    }
+
+    @Test
+    fun testAutoDetectScreenReadOnlyInvariant() {
+        val snapshot = UiSnapshot(packageName = "com.test.app", isRootAvailable = true)
+        val autoDet = resolver.autoDetectScreen(snapshot)
+
+        assertEquals("com.test.app", autoDet.packageName)
+        assertTrue(autoDet.isRootAvailable)
+        assertFalse("Auto detect screen analysis must strictly enforce actionDispatched = false", autoDet.actionDispatched)
     }
 }

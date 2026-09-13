@@ -205,19 +205,20 @@ class ActionResolver {
         if (!request.requestedRole.isNullOrBlank()) {
             val roleMatches = snapshot.allNodes.filter { it.className?.contains(request.requestedRole, ignoreCase = true) == true }
             if (roleMatches.isNotEmpty()) {
+                // Role or class name alone is NOT sufficient for a unique target match
                 val isAmbiguous = roleMatches.size > 1
                 val best = roleMatches.first()
                 return TargetResolutionResult(
                     match = ResolutionMatch(
                         node = best,
                         matchMethod = "ROLE_CLASS",
-                        confidence = if (isAmbiguous) 0.50 else 0.75,
-                        reason = "Matched class role '${request.requestedRole}'"
+                        confidence = 0.40,
+                        reason = "Matched generic class role '${request.requestedRole}' without specific text/id"
                     ),
                     candidateCount = roleMatches.size,
                     isAmbiguous = isAmbiguous,
-                    status = if (isAmbiguous) TargetResolutionStatus.AMBIGUOUS else TargetResolutionStatus.FOUND_UNIQUE,
-                    explanation = if (isAmbiguous) "Multiple candidates (${roleMatches.size}) matched role '${request.requestedRole}'" else "Resolved role '${request.requestedRole}'"
+                    status = TargetResolutionStatus.AMBIGUOUS,
+                    explanation = "Role/Class alone '${request.requestedRole}' is generic (${roleMatches.size} candidates) - classified as AMBIGUOUS"
                 )
             }
         }
@@ -228,6 +229,86 @@ class ActionResolver {
             isAmbiguous = false,
             status = TargetResolutionStatus.NOT_FOUND,
             explanation = "Target request not found in UI snapshot"
+        )
+    }
+
+    /**
+     * Generates a generic screen interaction map exposing all interactable UI elements on the current screen.
+     */
+    fun generateInteractionMap(snapshot: UiSnapshot): ScreenInteractionMap {
+        val interactiveNodes = snapshot.allNodes.filter {
+            it.isClickable || it.isEditable || it.isScrollable || !it.text.isNullOrBlank() || !it.contentDescription.isNullOrBlank()
+        }
+
+        val elements = interactiveNodes.take(30).mapIndexed { idx, node ->
+            ScreenInteractionElement(
+                index = idx + 1,
+                text = node.text,
+                contentDescription = node.contentDescription,
+                viewId = node.viewIdResourceName,
+                className = node.className,
+                isClickable = node.isClickable,
+                isEditable = node.isEditable,
+                isScrollable = node.isScrollable,
+                bounds = node.boundsInScreen
+            )
+        }
+
+        return ScreenInteractionMap(
+            packageName = snapshot.packageName,
+            totalElements = snapshot.totalNodeCount,
+            interactiveElementsCount = interactiveNodes.size,
+            elements = elements
+        )
+    }
+
+    /**
+     * Reports which generic execution mechanisms appear available for a discovered candidate without executing any action.
+     */
+    fun reportMechanismAvailability(candidate: UiNodeInfo?): MechanismAvailability {
+        if (candidate == null) {
+            return MechanismAvailability()
+        }
+
+        val hasClick = candidate.isClickable
+        val hasParentClick = !candidate.parentClassName.isNullOrBlank()
+        val hasBounds = !candidate.boundsInScreen.isNullOrBlank()
+        val isEditable = candidate.isEditable
+        val isFocusable = candidate.isFocusable
+
+        val preferred = when {
+            hasClick -> "Accessibility ACTION_CLICK"
+            isEditable -> "Accessibility ACTION_SET_TEXT"
+            hasBounds -> "Bounds Gesture Tap Fallback"
+            else -> "Inspection Only"
+        }
+
+        return MechanismAvailability(
+            accessibilityClick = hasClick,
+            clickableParent = hasParentClick,
+            gestureFallback = hasBounds,
+            focusAvailable = isFocusable,
+            setTextCompatible = isEditable,
+            preferredMechanism = preferred,
+            actionDispatched = false
+        )
+    }
+
+    /**
+     * Runs an automated auto-detect inspection of the current screen observation without taking actions.
+     */
+    fun autoDetectScreen(snapshot: UiSnapshot): AutoDetectResult {
+        val interactiveCount = snapshot.allNodes.count { it.isClickable || it.isEditable || it.isScrollable }
+        return AutoDetectResult(
+            packageName = snapshot.packageName,
+            isRootAvailable = snapshot.isRootAvailable,
+            totalNodeCount = snapshot.totalNodeCount,
+            interactiveCount = interactiveCount,
+            editableCount = snapshot.editableNodeCount,
+            scrollableCount = snapshot.scrollableNodeCount,
+            targetDiscoveryAvailable = snapshot.isRootAvailable && snapshot.totalNodeCount > 0,
+            visualFallbackAvailable = true,
+            actionDispatched = false
         )
     }
 
