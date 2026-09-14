@@ -1,0 +1,18 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "idleObservationSupported": true,
+  "onDemandRefreshSupported": true,
+  "lastObservationTimestamp": 1789320500000,
+  "foregroundPackage": "com.google.android.youtube",
+  "rootAvailable": true,
+  "traversalDurationMs": 3,
+  "totalNodeCount": 62,
+  "textNodeCount": 26,
+  "clickableCount": 14,
+  "editableCount": 1,
+  "scrollableCount": 4,
+  "focusedCount": 1,
+  "mediaProjectionAuthorized": false
+}

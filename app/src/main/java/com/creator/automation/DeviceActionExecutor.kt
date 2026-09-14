@@ -76,6 +76,23 @@ class DeviceActionExecutor(
             )
         }
 
+        // Policy Gate: Block Navigation Actions during Layer Validation Tests
+        if (workflowId.contains("LAYER_") && (
+            action.type == ActionType.PRESS_HOME ||
+            action.type == ActionType.GO_BACK ||
+            action.type == ActionType.PRESS_RECENTS ||
+            action.type == ActionType.LAUNCH_APP
+        )) {
+            Log.w(TAG, "BLOCKED_BY_POLICY: Action ${action.type} blocked during layer validation test '$workflowId'")
+            return ActionResult(
+                status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.PRECONDITION_FAILED,
+                trigger = trigger,
+                message = "BLOCKED_BY_POLICY: Navigation/Launch actions not permitted during layer validation",
+                snapshot = beforeSnapshot
+            )
+        }
+
         // 3. Dispatch Action via Generic Accessibility Engine
         val dispatchResult = when (action.type) {
             ActionType.LAUNCH_APP -> {
@@ -99,6 +116,7 @@ class DeviceActionExecutor(
             ActionType.WAIT_FOR_TEXT, ActionType.VERIFY_TEXT -> performWaitForText(action.targetValue, action.timeoutMs, service)
             ActionType.CLICK_TEXT -> performClickText(action.targetValue, service, beforeSnapshot, beforeStateSig)
             ActionType.LONG_CLICK -> performLongClick(action.targetValue, beforeSnapshot)
+            ActionType.FOCUS -> performFocus(action.targetValue, service, beforeSnapshot)
             ActionType.TYPE_TEXT -> performTypeText(action.targetValue, action.inputData, service, beforeSnapshot)
             ActionType.CLEAR_TEXT -> performClearText(action.targetValue, beforeSnapshot)
             ActionType.PRESS_ENTER, ActionType.SUBMIT_INPUT -> performSubmitInput(service, beforeSnapshot)
@@ -441,6 +459,48 @@ class DeviceActionExecutor(
         )
     }
 
+    private suspend fun performFocus(
+        targetLabel: String?,
+        service: AutomationAccessibilityService,
+        snapshot: UiSnapshot
+    ): ActionResult {
+        val freshRoot = service.getRootNode()
+        val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+
+        val res = if (!targetLabel.isNullOrBlank()) {
+            actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetLabel)
+        } else {
+            actionResolver.resolveEditableTarget(freshSnapshot, null)
+        }
+
+        val match = res.match
+        if (match == null) {
+            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Focus target not found")
+        }
+
+        val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
+            ?: return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Node reference missing")
+
+        val focusDispatched = nodeRef.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        nodeRef.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
+        kotlinx.coroutines.delay(300L)
+        val afterRoot = service.getRootNode()
+        val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+
+        val isFocusedConfirmed = afterSnapshot.allNodes.any { it.isFocused && (it.viewIdResourceName == match.node.viewIdResourceName || it.text == match.node.text) } ||
+                afterSnapshot.focusedNodes.isNotEmpty()
+
+        val verificationMsg = if (isFocusedConfirmed) "FOCUS_CONFIRMED" else if (focusDispatched) "FOCUS_UNCONFIRMED" else "FOCUS_FAILED"
+
+        return ActionResult(
+            status = if (isFocusedConfirmed || focusDispatched) ActionResultStatus.SUCCESS else ActionResultStatus.FAILED,
+            matchedNode = match.node,
+            matchMethod = match.matchMethod,
+            message = verificationMsg
+        )
+    }
+
     private fun performLongClick(targetText: String?, snapshot: UiSnapshot): ActionResult {
         if (targetText.isNullOrBlank()) return ActionResult(status = ActionResultStatus.FAILED, message = "LONG_CLICK requires target text")
         val res = actionResolver.resolveTargetWithAmbiguity(snapshot, targetText)
@@ -724,12 +784,18 @@ class DeviceActionExecutor(
         )
     }
 
-    private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String): ActionResult {
+    private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String, regionIndex: Int = 0): ActionResult {
         val freshRoot = service.getRootNode()
         val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
 
-        val scrollableInfo = freshSnapshot.scrollableNodes.firstOrNull()
-        val scrollableNode = scrollableInfo?.nodeRef as? AccessibilityNodeInfo
+        val scrollCandidates = freshSnapshot.scrollableNodes
+        if (scrollCandidates.isEmpty()) {
+            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "NO_SCROLL_AVAILABLE: No scrollable container on current screen")
+        }
+
+        val targetIdx = regionIndex.coerceIn(0, scrollCandidates.lastIndex)
+        val scrollableInfo = scrollCandidates[targetIdx]
+        val scrollableNode = scrollableInfo.nodeRef as? AccessibilityNodeInfo
 
         var dispatchAttempt = "ACCESSIBILITY_ACTION_SCROLL"
         var scrollDispatched = false
@@ -740,21 +806,28 @@ class DeviceActionExecutor(
             scrollDispatched = scrollableNode.performAction(action)
         }
 
-        // Tier 3: Dynamic Gesture Swipe Fallback
+        // Tier 3: Dynamic Gesture Swipe Fallback - Container Region Bounded
         if (!scrollDispatched) {
             dispatchAttempt = "DYNAMIC_GESTURE_SWIPE_FALLBACK"
-            val displayMetrics = context.resources.displayMetrics
-            val screenWidth = displayMetrics.widthPixels.toFloat()
-            val screenHeight = displayMetrics.heightPixels.toFloat()
 
-            val startX = screenWidth / 2f
-            val (startY, endY) = if (forward) {
-                Pair(screenHeight * 0.75f, screenHeight * 0.25f) // Swipe UP to scroll DOWN
-            } else {
-                Pair(screenHeight * 0.25f, screenHeight * 0.75f) // Swipe DOWN to scroll UP
+            val boundsRect = android.graphics.Rect()
+            if (scrollableNode != null) {
+                scrollableNode.getBoundsInScreen(boundsRect)
             }
 
-            Log.i(TAG, "SCROLL_GESTURE_FALLBACK: Attempting gesture swipe ($startX, $startY) -> ($startX, $endY)")
+            val (startX, startY, endY) = if (boundsRect.width() > 0 && boundsRect.height() > 0) {
+                val cx = boundsRect.centerX().toFloat()
+                val topY = boundsRect.top + (boundsRect.height() * 0.2f)
+                val bottomY = boundsRect.bottom - (boundsRect.height() * 0.2f)
+                if (forward) Triple(cx, bottomY, topY) else Triple(cx, topY, bottomY)
+            } else {
+                val displayMetrics = context.resources.displayMetrics
+                val cx = displayMetrics.widthPixels / 2f
+                val h = displayMetrics.heightPixels.toFloat()
+                if (forward) Triple(cx, h * 0.75f, h * 0.25f) else Triple(cx, h * 0.25f, h * 0.75f)
+            }
+
+            Log.i(TAG, "SCROLL_GESTURE_FALLBACK: Attempting container-bounded gesture swipe ($startX, $startY) -> ($startX, $endY)")
             scrollDispatched = AndroidAutomationCompat.dispatchSwipe(service, startX, startY, startX, endY)
         }
 

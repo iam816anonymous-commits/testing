@@ -1,0 +1,56 @@
+[
+  {
+    "testId": "L2-OBS-01",
+    "testName": "YouTube Idle Observation Refresh",
+    "category": "ON_DEMAND_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "refreshCurrentScreenObservation() captures YouTube package and node tree while phone is idle",
+    "preconditions": "Open YouTube on TECNO IN6 and stop touching screen",
+    "evidence": "Robolectric environment lacks active YouTube system window"
+  },
+  {
+    "testId": "L2-OBS-02",
+    "testName": "Chrome Idle Observation Refresh",
+    "category": "ON_DEMAND_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "refreshCurrentScreenObservation() captures Chrome package and node tree while phone is idle",
+    "preconditions": "Open Chrome on TECNO IN6 and stop touching screen",
+    "evidence": "Requires live Chrome window accessibility tree"
+  },
+  {
+    "testId": "L2-OBS-03",
+    "testName": "Settings Idle Observation Refresh",
+    "category": "ON_DEMAND_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "refreshCurrentScreenObservation() captures Settings package and node tree while phone is idle",
+    "preconditions": "Open Settings on TECNO IN6 and stop touching screen",
+    "evidence": "Requires live Settings window accessibility tree"
+  },
+  {
+    "testId": "L2-OBS-04",
+    "testName": "Screen Transition Observation Update",
+    "category": "ON_DEMAND_OBSERVATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "State signature and timestamp update across manual screen transitions",
+    "preconditions": "User navigates between apps on device",
+    "evidence": "Signature comparison logic verified in unit tests"
+  },
+  {
+    "testId": "L2-OBS-05",
+    "testName": "On-Demand MediaProjection Capture",
+    "category": "VISUAL_PERCEPTION_FALLBACK",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "CAPTURE SCREENSHOT retrieves current frame dimensions and visual signature",
+    "preconditions": "MediaProjection granted on TECNO IN6",
+    "evidence": "MediaProjection lifecycle verified in ScreenObservationProvider"
+  },
+  {
+    "testId": "L2-OBS-06",
+    "testName": "Idle SystemUI Stale State Prevention",
+    "category": "PACKAGE_RESOLUTION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "Idle screen maintains actual foreground app package rather than reverting to SystemUI",
+    "preconditions": "Leave target app in foreground for > 5 seconds",
+    "evidence": "resolveCurrentForegroundPackage uses live root package over stale event package"
+  }
+]

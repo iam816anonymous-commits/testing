@@ -1,0 +1,18 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "serviceCreated": false,
+  "serviceConnected": false,
+  "connectedTimestamp": 0,
+  "lastEventTimestamp": 0,
+  "lastEventType": "None",
+  "eventCount": 0,
+  "activePackage": "unknown",
+  "rootAvailable": false,
+  "rootNodeClass": "unknown",
+  "rootNodeChildCount": 0,
+  "observationTimestamp": 0,
+  "serviceDisconnected": false,
+  "disconnectTimestamp": 0
+}

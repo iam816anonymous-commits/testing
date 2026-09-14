@@ -31,6 +31,8 @@ class ActionResolver {
 
     companion object {
         private const val TAG = "ActionResolver"
+        private const val MAX_TRAVERSAL_DEPTH = 30
+        private const val AGENT_PACKAGE_NAME = "com.creator.automation"
 
         private val LOGIN_PROMPT_KEYWORDS = listOf(
             "sign in",
@@ -43,13 +45,23 @@ class ActionResolver {
 
         /**
          * Converts a raw Android AccessibilityNodeInfo tree into a lightweight UiSnapshot.
+         * When observing a non-agent target application, filters out CreatorAutomation overlay nodes to prevent pollution.
          */
         fun captureSnapshot(root: AccessibilityNodeInfo?, fallbackPackageName: String = ""): UiSnapshot {
+            val startTime = System.currentTimeMillis()
             if (root == null) {
-                return UiSnapshot(packageName = fallbackPackageName)
+                val duration = System.currentTimeMillis() - startTime
+                return UiSnapshot(
+                    packageName = fallbackPackageName.ifBlank { "unknown" },
+                    timestamp = startTime,
+                    isRootAvailable = false,
+                    traversalDurationMs = duration
+                )
             }
 
-            val packageName = root.packageName?.toString() ?: fallbackPackageName
+            val rawPackageName = root.packageName?.toString() ?: fallbackPackageName.ifBlank { "unknown" }
+            val isTargetingAgent = rawPackageName == AGENT_PACKAGE_NAME
+
             val visibleTexts = mutableListOf<String>()
             val contentDescriptions = mutableListOf<String>()
             val viewIds = mutableListOf<String>()
@@ -59,8 +71,14 @@ class ActionResolver {
             val focusedNodes = mutableListOf<UiNodeInfo>()
             val allNodes = mutableListOf<UiNodeInfo>()
 
-            fun traverse(node: AccessibilityNodeInfo?) {
-                if (node == null) return
+            fun traverse(node: AccessibilityNodeInfo?, depth: Int = 0) {
+                if (node == null || depth > MAX_TRAVERSAL_DEPTH) return
+
+                val nodePkg = node.packageName?.toString()
+                // Zero-pollution check: exclude CreatorAutomation diagnostic overlay nodes when observing external apps
+                if (!isTargetingAgent && nodePkg == AGENT_PACKAGE_NAME) {
+                    return
+                }
 
                 val text = node.text?.toString()?.trim()
                 val contentDesc = node.contentDescription?.toString()?.trim()
@@ -123,15 +141,25 @@ class ActionResolver {
                 }
 
                 for (i in 0 until node.childCount) {
-                    traverse(node.getChild(i))
+                    val child = try {
+                        node.getChild(i)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (child != null) {
+                        traverse(child, depth + 1)
+                    }
                 }
             }
 
             traverse(root)
 
+            val duration = System.currentTimeMillis() - startTime
             val snapshot = UiSnapshot(
-                packageName = packageName,
-                timestamp = System.currentTimeMillis(),
+                packageName = rawPackageName,
+                timestamp = startTime,
+                isRootAvailable = true,
+                traversalDurationMs = duration,
                 visibleTexts = visibleTexts.distinct(),
                 contentDescriptions = contentDescriptions.distinct(),
                 viewIds = viewIds.distinct(),
@@ -142,7 +170,7 @@ class ActionResolver {
                 allNodes = allNodes
             )
 
-            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$packageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}")
+            Log.d(TAG, "UI_SNAPSHOT_CREATED: pkg=$rawPackageName, totalNodes=${snapshot.totalNodeCount}, visibleTexts=${snapshot.visibleTexts.size}, editables=${snapshot.editableNodes.size}, durationMs=${duration}ms")
             return snapshot
         }
     }
@@ -156,6 +184,183 @@ class ActionResolver {
      */
     fun resolveTarget(snapshot: UiSnapshot, target: String): ResolutionMatch? {
         return resolveTargetWithAmbiguity(snapshot, target).match
+    }
+
+    /**
+     * Read-only Layer 3 Target Discovery: resolves a TargetRequest against a UiSnapshot without triggering any physical action.
+     */
+    fun discoverTarget(snapshot: UiSnapshot, request: TargetRequest): TargetResolutionResult {
+        if (!request.requestedViewId.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, request.requestedViewId)
+            if (res.match != null) return res
+        }
+        if (!request.requestedText.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, request.requestedText)
+            if (res.match != null) return res
+        }
+        if (!request.requestedContentDescription.isNullOrBlank()) {
+            val res = resolveTargetWithAmbiguity(snapshot, request.requestedContentDescription)
+            if (res.match != null) return res
+        }
+        if (!request.requestedRole.isNullOrBlank()) {
+            val roleMatches = snapshot.allNodes.filter { it.className?.contains(request.requestedRole, ignoreCase = true) == true }
+            if (roleMatches.isNotEmpty()) {
+                // Role or class name alone is NOT sufficient for a unique target match
+                val isAmbiguous = roleMatches.size > 1
+                val best = roleMatches.first()
+                return TargetResolutionResult(
+                    match = ResolutionMatch(
+                        node = best,
+                        matchMethod = "ROLE_CLASS",
+                        confidence = 0.40,
+                        reason = "Matched generic class role '${request.requestedRole}' without specific text/id"
+                    ),
+                    candidateCount = roleMatches.size,
+                    isAmbiguous = isAmbiguous,
+                    status = TargetResolutionStatus.AMBIGUOUS,
+                    explanation = "Role/Class alone '${request.requestedRole}' is generic (${roleMatches.size} candidates) - classified as AMBIGUOUS"
+                )
+            }
+        }
+
+        return TargetResolutionResult(
+            match = null,
+            candidateCount = 0,
+            isAmbiguous = false,
+            status = TargetResolutionStatus.NOT_FOUND,
+            explanation = "Target request not found in UI snapshot"
+        )
+    }
+
+    /**
+     * Generates a generic screen interaction map exposing all interactable UI elements on the current screen.
+     */
+    fun generateInteractionMap(snapshot: UiSnapshot): ScreenInteractionMap {
+        val interactiveSurfaces = discoverInteractionSurfaces(snapshot)
+
+        val elements = interactiveSurfaces.take(30).mapIndexed { idx, surface ->
+            ScreenInteractionElement(
+                index = idx + 1,
+                text = surface.text,
+                contentDescription = surface.contentDescription,
+                viewId = surface.viewId,
+                className = surface.className,
+                isClickable = surface.isClickable,
+                isEditable = surface.isEditable,
+                isScrollable = surface.isScrollable,
+                bounds = surface.bounds
+            )
+        }
+
+        return ScreenInteractionMap(
+            packageName = snapshot.packageName,
+            totalElements = snapshot.totalNodeCount,
+            interactiveElementsCount = interactiveSurfaces.size,
+            elements = elements
+        )
+    }
+
+    /**
+     * Extracts structured, deterministic InteractionSurfaces bound to the active UiSnapshot's state signature.
+     */
+    fun discoverInteractionSurfaces(snapshot: UiSnapshot): List<InteractionSurface> {
+        val stateSig = StateSignatureGenerator.generateSignature(snapshot)
+        val interactiveNodes = snapshot.allNodes.filter {
+            it.isClickable || it.isEditable || it.isScrollable || !it.text.isNullOrBlank() || !it.contentDescription.isNullOrBlank()
+        }
+
+        return interactiveNodes.mapIndexed { idx, node ->
+            val role = inferSurfaceRole(node)
+
+            InteractionSurface(
+                index = idx + 1,
+                text = node.text,
+                contentDescription = node.contentDescription,
+                viewId = node.viewIdResourceName,
+                className = node.className,
+                role = role.name,
+                isClickable = node.isClickable,
+                isEditable = node.isEditable,
+                isScrollable = node.isScrollable,
+                isFocused = node.isFocused,
+                isEnabled = node.isEnabled,
+                bounds = node.boundsInScreen,
+                parentContext = node.parentClassName,
+                observationId = snapshot.id,
+                observationTimestamp = snapshot.timestamp,
+                stateSignature = stateSig,
+                confidence = if (!node.viewIdResourceName.isNullOrBlank()) 1.0 else if (!node.text.isNullOrBlank()) 0.95 else 0.75
+            )
+        }
+    }
+
+    /**
+     * Infer surface role generically based on accessibility attributes and class name.
+     */
+    fun inferSurfaceRole(node: UiNodeInfo): SurfaceRole {
+        val cls = node.className?.lowercase() ?: ""
+        return when {
+            node.isEditable || cls.contains("edittext") -> SurfaceRole.EDITABLE
+            node.isScrollable || cls.contains("scrollview") || cls.contains("recyclerview") || cls.contains("listview") -> SurfaceRole.SCROLL_CONTAINER
+            cls.contains("checkbox") -> SurfaceRole.CHECKBOX
+            cls.contains("switch") || cls.contains("togglebutton") -> SurfaceRole.SWITCH
+            cls.contains("button") || (node.isClickable && !node.text.isNullOrBlank()) -> SurfaceRole.BUTTON
+            cls.contains("image") -> SurfaceRole.IMAGE
+            cls.contains("tab") -> SurfaceRole.TAB
+            cls.contains("url") || cls.contains("link") -> SurfaceRole.LINK
+            !node.text.isNullOrBlank() -> SurfaceRole.TEXT
+            else -> SurfaceRole.UNKNOWN
+        }
+    }
+
+    /**
+     * Reports which generic execution mechanisms appear available for a discovered candidate without executing any action.
+     */
+    fun reportMechanismAvailability(candidate: UiNodeInfo?): MechanismAvailability {
+        if (candidate == null) {
+            return MechanismAvailability()
+        }
+
+        val hasClick = candidate.isClickable
+        val hasParentClick = !candidate.parentClassName.isNullOrBlank()
+        val hasBounds = !candidate.boundsInScreen.isNullOrBlank()
+        val isEditable = candidate.isEditable
+        val isFocusable = candidate.isFocusable
+
+        val preferred = when {
+            hasClick -> "Accessibility ACTION_CLICK"
+            isEditable -> "Accessibility ACTION_SET_TEXT"
+            hasBounds -> "Bounds Gesture Tap Fallback"
+            else -> "Inspection Only"
+        }
+
+        return MechanismAvailability(
+            accessibilityClick = hasClick,
+            clickableParent = hasParentClick,
+            gestureFallback = hasBounds,
+            focusAvailable = isFocusable,
+            setTextCompatible = isEditable,
+            preferredMechanism = preferred,
+            actionDispatched = false
+        )
+    }
+
+    /**
+     * Runs an automated auto-detect inspection of the current screen observation without taking actions.
+     */
+    fun autoDetectScreen(snapshot: UiSnapshot): AutoDetectResult {
+        val interactiveCount = snapshot.allNodes.count { it.isClickable || it.isEditable || it.isScrollable }
+        return AutoDetectResult(
+            packageName = snapshot.packageName,
+            isRootAvailable = snapshot.isRootAvailable,
+            totalNodeCount = snapshot.totalNodeCount,
+            interactiveCount = interactiveCount,
+            editableCount = snapshot.editableNodeCount,
+            scrollableCount = snapshot.scrollableNodeCount,
+            targetDiscoveryAvailable = snapshot.isRootAvailable && snapshot.totalNodeCount > 0,
+            visualFallbackAvailable = true,
+            actionDispatched = false
+        )
     }
 
     fun resolveTargetWithAmbiguity(snapshot: UiSnapshot, target: String): TargetResolutionResult {

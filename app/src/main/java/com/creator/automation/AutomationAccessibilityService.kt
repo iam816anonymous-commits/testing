@@ -1,12 +1,23 @@
 package com.creator.automation
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import android.widget.LinearLayout
+import android.widget.TextView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,10 +29,44 @@ import java.io.FileOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+data class AccessibilityDiagnosticState(
+    val serviceCreated: Boolean = false,
+    val serviceConnected: Boolean = false,
+    val connectedTimestamp: Long = 0L,
+    val lastEventTimestamp: Long = 0L,
+    val lastEventType: String = "None",
+    val eventCount: Long = 0L,
+    val activePackage: String = "unknown",
+    val rootAvailable: Boolean = false,
+    val rootNodeClass: String = "unknown",
+    val rootNodeChildCount: Int = 0,
+    val observationTimestamp: Long = 0L,
+    val serviceDisconnected: Boolean = false,
+    val disconnectTimestamp: Long = 0L
+)
+
+data class CrossAppObservationState(
+    val observationActive: Boolean = false,
+    val foregroundPackage: String = "unknown",
+    val foregroundClass: String = "unknown",
+    val rootAvailable: Boolean = false,
+    val nodeCount: Int = 0,
+    val textNodeCount: Int = 0,
+    val clickableCount: Int = 0,
+    val editableCount: Int = 0,
+    val scrollableCount: Int = 0,
+    val focusedCount: Int = 0,
+    val observationTimestamp: Long = 0L,
+    val eventCount: Long = 0L,
+    val lastEventType: String = "None"
+)
+
 class AutomationAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "AutomationAccService"
+        private const val AGENT_PACKAGE_NAME = "com.creator.automation"
+        private const val OVERLAY_UPDATE_THROTTLE_MS = 300L
 
         private val _isServiceEnabled = MutableStateFlow(false)
         val isServiceEnabled: StateFlow<Boolean> = _isServiceEnabled.asStateFlow()
@@ -35,6 +80,12 @@ class AutomationAccessibilityService : AccessibilityService() {
         private val _lastEventTimestamp = MutableStateFlow<Long>(0L)
         val lastEventTimestamp: StateFlow<Long> = _lastEventTimestamp.asStateFlow()
 
+        private val _diagnosticState = MutableStateFlow(AccessibilityDiagnosticState())
+        val diagnosticState: StateFlow<AccessibilityDiagnosticState> = _diagnosticState.asStateFlow()
+
+        private val _crossAppObservationState = MutableStateFlow(CrossAppObservationState())
+        val crossAppObservationState: StateFlow<CrossAppObservationState> = _crossAppObservationState.asStateFlow()
+
         private val _currentLearningMode = MutableStateFlow(LearningMode.IDLE)
         val currentLearningMode: StateFlow<LearningMode> = _currentLearningMode.asStateFlow()
 
@@ -43,31 +94,826 @@ class AutomationAccessibilityService : AccessibilityService() {
             Log.i(TAG, "LEARNING_MODE_CHANGED: $mode")
         }
 
+        private var overlayX = 20
+        private var overlayY = 50
+
         var instance: AutomationAccessibilityService? = null
             private set
+
+        fun resetDiagnosticsForTesting() {
+            overlayX = 20
+            overlayY = 50
+            _diagnosticState.value = AccessibilityDiagnosticState()
+            _crossAppObservationState.value = CrossAppObservationState()
+            _isServiceEnabled.value = false
+            _activePackageName.value = ""
+            _lastAccessibilityEvent.value = "None"
+            _lastEventTimestamp.value = 0L
+            instance = null
+        }
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var windowManager: WindowManager? = null
+    private var overlayView: View? = null
+    private var overlayTextView: TextView? = null
+    private var overlayContainerView: LinearLayout? = null
+    private var lastOverlayUpdateTimestamp: Long = 0L
+
+    override fun onCreate() {
+        super.onCreate()
+        _diagnosticState.value = _diagnosticState.value.copy(serviceCreated = true)
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceEnabled.value = true
+        val now = System.currentTimeMillis()
+        _diagnosticState.value = _diagnosticState.value.copy(
+            serviceCreated = true,
+            serviceConnected = true,
+            connectedTimestamp = now,
+            serviceDisconnected = false
+        )
         Log.i(TAG, "AutomationAccessibilityService connected")
+    }
+
+    fun setCrossAppObservationActive(active: Boolean) {
+        val current = _crossAppObservationState.value
+        if (current.observationActive == active) return
+
+        _crossAppObservationState.value = current.copy(observationActive = active)
+
+        mainHandler.post {
+            if (active) {
+                showDiagnosticOverlay()
+            } else {
+                hideDiagnosticOverlay()
+            }
+        }
+    }
+
+    private fun showDiagnosticOverlay() {
+        if (overlayView != null) return
+        try {
+            windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            if (windowManager == null) return
+
+            val layoutParams = WindowManager.LayoutParams().apply {
+                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_PHONE
+                }
+                flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                format = PixelFormat.TRANSLUCENT
+                width = WindowManager.LayoutParams.WRAP_CONTENT
+                height = WindowManager.LayoutParams.WRAP_CONTENT
+                gravity = Gravity.TOP or Gravity.START
+                x = overlayX
+                y = overlayY
+            }
+
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.argb(240, 15, 23, 42))
+                setPadding(14, 10, 14, 10)
+            }
+
+            overlayView = container
+            overlayContainerView = container
+
+            renderOverlayContent()
+
+            windowManager?.addView(overlayView, layoutParams)
+            Log.i(TAG, "DIAGNOSTIC_OVERLAY_SHOW")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing diagnostic overlay", e)
+        }
+    }
+
+    private fun hideDiagnosticOverlay() {
+        if (overlayView != null && windowManager != null) {
+            try {
+                windowManager?.removeView(overlayView)
+                Log.i(TAG, "DIAGNOSTIC_OVERLAY_HIDE")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error removing diagnostic overlay", e)
+            } finally {
+                overlayView = null
+                overlayTextView = null
+            }
+        }
+    }
+
+    private fun updateDiagnosticOverlayText(state: CrossAppObservationState) {
+        val now = System.currentTimeMillis()
+        if (now - lastOverlayUpdateTimestamp < OVERLAY_UPDATE_THROTTLE_MS) {
+            return
+        }
+        lastOverlayUpdateTimestamp = now
+
+        mainHandler.post {
+            renderOverlayContent()
+        }
+    }
+
+    private fun attachDragAndTapListener(
+        view: View,
+        onTap: () -> Unit
+    ) {
+        val root = overlayView ?: return
+        val layoutParams = root.layoutParams as? WindowManager.LayoutParams ?: return
+        val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var isDragging = false
+
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    initialX = layoutParams.x
+                    initialY = layoutParams.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - initialTouchX
+                    val dy = event.rawY - initialTouchY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > touchSlop) {
+                        isDragging = true
+                    }
+                    if (isDragging) {
+                        val displayMetrics = resources.displayMetrics
+                        val maxX = (displayMetrics.widthPixels - 80).coerceAtLeast(0)
+                        val maxY = (displayMetrics.heightPixels - 120).coerceAtLeast(0)
+                        layoutParams.x = (initialX + dx.toInt()).coerceIn(0, maxX)
+                        layoutParams.y = (initialY + dy.toInt()).coerceIn(0, maxY)
+                        overlayX = layoutParams.x
+                        overlayY = layoutParams.y
+                        windowManager?.updateViewLayout(overlayView, layoutParams)
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        onTap()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun renderOverlayContent() {
+        val container = overlayContainerView ?: return
+        container.removeAllViews()
+
+        val state = _crossAppObservationState.value
+        val expanded = LayerValidationController.isOverlayExpanded.value
+        val menuView = LayerValidationController.currentMenuView.value
+        val retained = LayerValidationController.retainedTarget.value
+        val trace = LayerValidationController.lastValidationTrace.value
+
+        if (!expanded) {
+            val targetStatusStr = when {
+                retained == null -> ""
+                retained.status == ValidationTargetStatus.STALE -> " [STALE]"
+                else -> " [READY]"
+            }
+            val collapsedBtn = android.widget.Button(this).apply {
+                setTextColor(Color.GREEN)
+                textSize = 9f
+                setBackgroundColor(Color.argb(200, 15, 23, 42))
+                text = "◉ AGENT CONSOLE (Drag/Tap)\n${state.foregroundPackage}$targetStatusStr"
+            }
+            attachDragAndTapListener(collapsedBtn) {
+                LayerValidationController.setOverlayExpanded(true)
+                renderOverlayContent()
+            }
+            container.addView(collapsedBtn)
+            return
+        }
+
+        // Header / Drag Handle
+        val headerTv = TextView(this).apply {
+            setTextColor(Color.GREEN)
+            textSize = 10f
+            text = "◉ CREATOR AGENT CONSOLE (Drag Handle)\nApp: ${state.foregroundPackage}"
+            setPadding(0, 0, 0, 6)
+        }
+        attachDragAndTapListener(headerTv) {
+            LayerValidationController.setOverlayExpanded(false)
+            renderOverlayContent()
+        }
+        container.addView(headerTv)
+
+        when (menuView) {
+            OverlayMenuView.MAIN_MENU -> {
+                val l3Btn = android.widget.Button(this).apply {
+                    text = "[ L3 ] TARGET DISCOVERY"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L3_TARGET)
+                        renderOverlayContent()
+                    }
+                }
+                val l4Btn = android.widget.Button(this).apply {
+                    text = "[ L4 ] TOUCH EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L4_TOUCH)
+                        renderOverlayContent()
+                    }
+                }
+                val l5Btn = android.widget.Button(this).apply {
+                    text = "[ L5 ] SCROLL EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L5_SCROLL)
+                        renderOverlayContent()
+                    }
+                }
+                val l6Btn = android.widget.Button(this).apply {
+                    text = "[ L6 ] FOCUS EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L6_FOCUS)
+                        renderOverlayContent()
+                    }
+                }
+                val l7Btn = android.widget.Button(this).apply {
+                    text = "[ L7 ] TEXT INPUT EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L7_INPUT)
+                        renderOverlayContent()
+                    }
+                }
+                val l8Btn = android.widget.Button(this).apply {
+                    text = "[ L8 ] SUBMIT EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L8_SUBMIT)
+                        renderOverlayContent()
+                    }
+                }
+
+                val statusTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    val targetLabel = retained?.candidate?.text ?: retained?.sourceQuery ?: "NONE"
+                    text = "Target: $targetLabel | Status: ${retained?.status ?: "NONE"}"
+                }
+
+                val actionRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                }
+                val refreshBtn = android.widget.Button(this).apply {
+                    text = "REFRESH"
+                    textSize = 9f
+                    setOnClickListener {
+                        refreshCurrentScreenObservation()
+                        renderOverlayContent()
+                    }
+                }
+                val collapseBtn = android.widget.Button(this).apply {
+                    text = "COLLAPSE"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.setOverlayExpanded(false)
+                        renderOverlayContent()
+                    }
+                }
+                actionRow.addView(refreshBtn)
+                actionRow.addView(collapseBtn)
+
+                container.addView(l3Btn)
+                container.addView(l4Btn)
+                container.addView(l5Btn)
+                container.addView(l6Btn)
+                container.addView(l7Btn)
+                container.addView(l8Btn)
+                container.addView(statusTv)
+                container.addView(actionRow)
+            }
+
+            OverlayMenuView.L3_TARGET -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.CYAN)
+                    textSize = 10f
+                    text = "L3 INTERACTION SURFACES"
+                }
+
+                val currentSnap = refreshCurrentScreenObservation()
+                val surfaces = ActionResolver().discoverInteractionSurfaces(currentSnap)
+
+                val listTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 8.5f
+                    val topSurfaces = surfaces.take(5).mapIndexed { idx, surf ->
+                        "${idx + 1}. [${surf.role}] ${surf.text ?: surf.contentDescription ?: surf.viewId ?: "Element"}"
+                    }
+                    text = if (topSurfaces.isNotEmpty()) topSurfaces.joinToString("\n") else "No interactable surfaces found"
+                }
+
+                val queryEt = android.widget.EditText(this).apply {
+                    hint = "Or type custom target query"
+                    textSize = 9f
+                    setTextColor(Color.WHITE)
+                    setHintTextColor(Color.GRAY)
+                    setText(LayerValidationController.activeSearchQuery.value)
+                }
+
+                val discoverBtn = android.widget.Button(this).apply {
+                    text = "DISCOVER TARGET"
+                    textSize = 9f
+                    setOnClickListener {
+                        val q = queryEt.text.toString().trim()
+                        if (q.isNotBlank()) {
+                            LayerValidationController.setActiveSearchQuery(q)
+                            val snap = refreshCurrentScreenObservation()
+                            val cand = LayerValidationController.getOrCreateInstance().discoverTargetForValidation(snap, q)
+                            if (cand != null) {
+                                LayerValidationController.getOrCreateInstance().selectAndRetainTarget(cand, q, snap)
+                            }
+                            renderOverlayContent()
+                        }
+                    }
+                }
+
+                val statusTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "FOUND: '${retained.candidate.text ?: retained.sourceQuery}' (${retained.status})" else "Status: NOT_DISCOVERED"
+                }
+
+                val useAndGoBtn = android.widget.Button(this).apply {
+                    text = "USE TARGET -> GO TO L4 TOUCH"
+                    textSize = 9f
+                    isEnabled = retained != null
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L4_TOUCH)
+                        renderOverlayContent()
+                    }
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(listTv)
+                container.addView(queryEt)
+                container.addView(discoverBtn)
+                container.addView(statusTv)
+                container.addView(useAndGoBtn)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L4_TOUCH -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L4 TOUCH VALIDATION"
+                }
+
+                val targetTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "Target: '${retained.candidate.text ?: retained.sourceQuery}' (${retained.status})" else "NO TARGET SELECTED"
+                }
+
+                val testClickBtn = android.widget.Button(this).apply {
+                    text = "TEST CLICK"
+                    textSize = 9f
+                    isEnabled = retained != null && retained.status == ValidationTargetStatus.READY
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer4TouchTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 4) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(targetTv)
+                container.addView(testClickBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L5_SCROLL -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L5 SCROLL VALIDATION"
+                }
+
+                val dirBtn = android.widget.Button(this).apply {
+                    text = "Direction: [ ${LayerValidationController.selectedScrollDirection.value} ]"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.getOrCreateInstance().toggleScrollDirection()
+                        renderOverlayContent()
+                    }
+                }
+
+                val testScrollBtn = android.widget.Button(this).apply {
+                    text = "TEST SCROLL"
+                    textSize = 9f
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer5ScrollTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 5) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(dirBtn)
+                container.addView(testScrollBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.DETAILS -> {
+                val detailsTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = "Total Nodes: ${state.nodeCount}\nClickable: ${state.clickableCount}\nScrollable: ${state.scrollableCount}\nEditable: ${state.editableCount}"
+                }
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+                container.addView(detailsTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L6_FOCUS -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L6 FOCUS VALIDATION"
+                }
+
+                val targetTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "Target: '${retained.candidate.text ?: retained.sourceQuery}'" else "NO TARGET (Will Focus Editable)"
+                }
+
+                val testFocusBtn = android.widget.Button(this).apply {
+                    text = "TEST FOCUS"
+                    textSize = 9f
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer6FocusTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 6) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(targetTv)
+                container.addView(testFocusBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L7_INPUT -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L7 TEXT INPUT VALIDATION"
+                }
+
+                val targetTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "Target: '${retained.candidate.text ?: retained.sourceQuery}'" else "NO TARGET (Will Type into Focused Editable)"
+                }
+
+                val inputEt = android.widget.EditText(this).apply {
+                    hint = "Type text to inject into app field"
+                    textSize = 9f
+                    setTextColor(Color.WHITE)
+                    setHintTextColor(Color.GRAY)
+                    setText(LayerValidationController.typeInputText.value)
+                }
+
+                val testTypeBtn = android.widget.Button(this).apply {
+                    text = "TEST TYPE TEXT"
+                    textSize = 9f
+                    setOnClickListener {
+                        val input = inputEt.text.toString().trim()
+                        if (input.isNotBlank()) {
+                            LayerValidationController.setTypeInputText(input)
+                            serviceScope.launch {
+                                val traceRes = LayerValidationController.getOrCreateInstance().executeLayer7InputTest(this@AutomationAccessibilityService, input)
+                                mainHandler.post {
+                                    renderOverlayContent()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 7) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(targetTv)
+                container.addView(inputEt)
+                container.addView(testTypeBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L8_SUBMIT -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L8 SUBMIT VALIDATION"
+                }
+
+                val infoTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = "Discovers semantic submit/search controls on current screen"
+                }
+
+                val testSubmitBtn = android.widget.Button(this).apply {
+                    text = "TEST SUBMIT"
+                    textSize = 9f
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer8SubmitTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 8) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(infoTv)
+                container.addView(testSubmitBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.TRACE -> {
+                val traceTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (trace != null) "Layer: ${trace.layer}\nTarget: ${trace.targetIdentifier}\nDispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No trace recorded"
+                }
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+                container.addView(traceTv)
+                container.addView(backBtn)
+            }
+        }
+    }
+
+    /**
+     * Resolves the true currently visible foreground package name.
+     * Evaluates live root, application windows, or last non-SystemUI event package.
+     */
+    fun resolveCurrentForegroundPackage(root: AccessibilityNodeInfo?): String {
+        val rootPkg = root?.packageName?.toString()
+        if (!rootPkg.isNullOrBlank() && rootPkg != "com.android.systemui" && rootPkg != AGENT_PACKAGE_NAME) {
+            return rootPkg
+        }
+
+        // Search active application windows if root is null, SystemUI, or Agent Overlay
+        try {
+            val appWindow = windows?.firstOrNull {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                        it.root?.packageName != null &&
+                        it.root?.packageName != "com.android.systemui" &&
+                        it.root?.packageName != AGENT_PACKAGE_NAME
+            }
+            val appPkg = appWindow?.root?.packageName?.toString()
+            if (!appPkg.isNullOrBlank()) {
+                return appPkg
+            }
+        } catch (e: Exception) {
+            // Window access might be restricted or unsupported on mock
+        }
+
+        if (!rootPkg.isNullOrBlank() && rootPkg != AGENT_PACKAGE_NAME) {
+            return rootPkg
+        }
+
+        val lastPkg = _activePackageName.value
+        if (!lastPkg.isNullOrBlank()) {
+            return lastPkg
+        }
+
+        return "unknown"
+    }
+
+    /**
+     * Obtains an explicit, fresh, structured UI snapshot of the currently visible screen on demand,
+     * independent of whether a new accessibility event has arrived.
+     */
+    fun refreshCurrentScreenObservation(): UiSnapshot {
+        val root = rootInActiveWindow
+        val resolvedPkg = resolveCurrentForegroundPackage(root)
+        val snapshot = ActionResolver.captureSnapshot(root, resolvedPkg)
+        val now = System.currentTimeMillis()
+
+        _diagnosticState.value = _diagnosticState.value.copy(
+            activePackage = snapshot.packageName,
+            rootAvailable = snapshot.isRootAvailable,
+            rootNodeClass = root?.className?.toString() ?: "unknown",
+            rootNodeChildCount = root?.childCount ?: 0,
+            observationTimestamp = now
+        )
+
+        val crossApp = _crossAppObservationState.value
+        if (crossApp.observationActive) {
+            val updatedCrossApp = crossApp.copy(
+                foregroundPackage = snapshot.packageName,
+                rootAvailable = snapshot.isRootAvailable,
+                nodeCount = snapshot.totalNodeCount,
+                textNodeCount = snapshot.textNodeCount,
+                clickableCount = snapshot.clickableNodeCount,
+                editableCount = snapshot.editableNodeCount,
+                scrollableCount = snapshot.scrollableNodeCount,
+                focusedCount = snapshot.focusedNodeCount,
+                observationTimestamp = now
+            )
+            _crossAppObservationState.value = updatedCrossApp
+            updateDiagnosticOverlayText(updatedCrossApp)
+        }
+
+        Log.i(TAG, "REFRESH_SCREEN_OBSERVATION: pkg=${snapshot.packageName}, nodes=${snapshot.totalNodeCount}, root=${snapshot.isRootAvailable}")
+        return snapshot
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
         val eventTypeName = AccessibilityEvent.eventTypeToString(event.eventType)
-        val pkg = event.packageName?.toString()
+        val pkg = event.packageName?.toString() ?: "unknown"
+        val now = System.currentTimeMillis()
 
-        _lastEventTimestamp.value = System.currentTimeMillis()
+        _lastEventTimestamp.value = now
         _lastAccessibilityEvent.value = "$eventTypeName ($pkg)"
 
-        if (!pkg.isNullOrBlank() && pkg != "com.creator.automation") {
+        // Break overlay feedback loop: ignore events caused by agent overlay itself
+        if (pkg == AGENT_PACKAGE_NAME) {
+            return
+        }
+
+        if (pkg.isNotBlank() && pkg != "com.android.systemui" && pkg != "unknown") {
             _activePackageName.value = pkg
             Log.d(TAG, "PACKAGE_CHANGED: $pkg (event: $eventTypeName)")
+        }
+
+        val currentDiag = _diagnosticState.value
+        val root = rootInActiveWindow
+        val hasRoot = root != null
+        val resolvedPkg = resolveCurrentForegroundPackage(root)
+
+        _diagnosticState.value = currentDiag.copy(
+            lastEventTimestamp = now,
+            lastEventType = eventTypeName,
+            eventCount = currentDiag.eventCount + 1,
+            activePackage = resolvedPkg,
+            rootAvailable = hasRoot,
+            rootNodeClass = root?.className?.toString() ?: "unknown",
+            rootNodeChildCount = root?.childCount ?: 0,
+            observationTimestamp = if (hasRoot) now else currentDiag.observationTimestamp
+        )
+
+        val crossApp = _crossAppObservationState.value
+        if (crossApp.observationActive) {
+            val snapshot = ActionResolver.captureSnapshot(root, resolvedPkg)
+            val updatedCrossApp = crossApp.copy(
+                foregroundPackage = resolvedPkg,
+                foregroundClass = event.className?.toString() ?: crossApp.foregroundClass,
+                rootAvailable = snapshot.isRootAvailable,
+                nodeCount = snapshot.totalNodeCount,
+                textNodeCount = snapshot.textNodeCount,
+                clickableCount = snapshot.clickableNodeCount,
+                editableCount = snapshot.editableNodeCount,
+                scrollableCount = snapshot.scrollableNodeCount,
+                focusedCount = snapshot.focusedNodeCount,
+                observationTimestamp = snapshot.timestamp,
+                eventCount = crossApp.eventCount + 1,
+                lastEventType = eventTypeName
+            )
+            _crossAppObservationState.value = updatedCrossApp
+            updateDiagnosticOverlayText(updatedCrossApp)
         }
 
         // Capture user interactions when in TRAINING mode
@@ -75,7 +921,7 @@ class AutomationAccessibilityService : AccessibilityService() {
             val clickedText = event.text.firstOrNull()?.toString()?.trim()
                 ?: event.contentDescription?.toString()?.trim()
 
-            if (!clickedText.isNullOrBlank() && !pkg.isNullOrBlank()) {
+            if (!clickedText.isNullOrBlank() && pkg != "unknown") {
                 Log.i(TAG, "USER_DEMONSTRATION_DETECTED: Package '$pkg', Clicked Text '$clickedText'")
                 recordUserDemonstration(pkg, clickedText)
             }
@@ -136,10 +982,17 @@ class AutomationAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        hideDiagnosticOverlay()
         if (instance == this) {
             instance = null
         }
         _isServiceEnabled.value = false
+        val now = System.currentTimeMillis()
+        _diagnosticState.value = _diagnosticState.value.copy(
+            serviceConnected = false,
+            serviceDisconnected = true,
+            disconnectTimestamp = now
+        )
         Log.i(TAG, "AutomationAccessibilityService destroyed")
     }
 
@@ -149,22 +1002,42 @@ class AutomationAccessibilityService : AccessibilityService() {
     fun getDiagnosticsSummary(): String {
         val root = rootInActiveWindow
         val info = serviceInfo
+        val state = _diagnosticState.value
         return "AccessibilityService:\n" +
-                "connected = true\n" +
+                "serviceCreated = ${state.serviceCreated}\n" +
+                "serviceConnected = ${state.serviceConnected}\n" +
+                "connectedTimestamp = ${state.connectedTimestamp}\n" +
                 "serviceInstance = ${this.javaClass.simpleName}\n" +
                 "canRetrieveWindowContent = ${info?.canRetrieveWindowContent ?: true}\n" +
                 "canPerformGestures = ${Build.VERSION.SDK_INT >= Build.VERSION_CODES.N}\n" +
-                "activeWindow = ${root != null}\n" +
-                "package = ${root?.packageName ?: _activePackageName.value ?: "unknown"}\n" +
-                "lastAccessibilityEvent = ${_lastAccessibilityEvent.value}\n" +
-                "lastEventTime = ${_lastEventTimestamp.value}"
+                "rootAvailable = ${root != null}\n" +
+                "rootNodeClass = ${root?.className ?: state.rootNodeClass}\n" +
+                "rootNodeChildCount = ${root?.childCount ?: state.rootNodeChildCount}\n" +
+                "activePackage = ${root?.packageName ?: _activePackageName.value ?: state.activePackage}\n" +
+                "eventCount = ${state.eventCount}\n" +
+                "lastEventType = ${state.lastEventType}\n" +
+                "lastEventTimestamp = ${state.lastEventTimestamp}\n" +
+                "serviceDisconnected = ${state.serviceDisconnected}\n" +
+                "disconnectTimestamp = ${state.disconnectTimestamp}"
     }
 
     /**
      * Retrieves the current root AccessibilityNodeInfo.
      */
     fun getRootNode(): AccessibilityNodeInfo? {
-        return rootInActiveWindow
+        val root = rootInActiveWindow
+        val now = System.currentTimeMillis()
+        if (root != null) {
+            _diagnosticState.value = _diagnosticState.value.copy(
+                rootAvailable = true,
+                rootNodeClass = root.className?.toString() ?: "unknown",
+                rootNodeChildCount = root.childCount,
+                observationTimestamp = now
+            )
+        } else {
+            _diagnosticState.value = _diagnosticState.value.copy(rootAvailable = false)
+        }
+        return root
     }
 
     /**

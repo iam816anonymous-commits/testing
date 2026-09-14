@@ -1,0 +1,42 @@
+{
+  "testRunId": "LAYER_5_PHYSICAL_VALIDATION_TEMPLATE",
+  "device": "TECNO IN6 (Android 8.1 / API 27)",
+  "layer": 5,
+  "actionType": "SCROLL",
+  "physicalVerificationRequired": true,
+  "tests": [
+    {
+      "testId": "L5_SCROLL_01_SETTINGS_SCROLL_DOWN",
+      "targetApplication": "com.android.settings",
+      "targetRegion": "Settings List View",
+      "direction": "DOWN",
+      "expectedPhysicalOutcome": "Settings menu list scrolls downward showing lower items",
+      "userObservedResult": "PASS / FAIL",
+      "dispatchStatus": "SUCCESS / FAILED",
+      "verificationStatus": "CONFIRMED / NOT_CONFIRMED",
+      "notes": "User notes on actual TECNO IN6 scrolling movement"
+    },
+    {
+      "testId": "L5_SCROLL_02_SETTINGS_SCROLL_UP",
+      "targetApplication": "com.android.settings",
+      "targetRegion": "Settings List View",
+      "direction": "UP",
+      "expectedPhysicalOutcome": "Settings menu list scrolls upward returning to top items",
+      "userObservedResult": "PASS / FAIL",
+      "dispatchStatus": "SUCCESS / FAILED",
+      "verificationStatus": "CONFIRMED / NOT_CONFIRMED",
+      "notes": "User notes on actual TECNO IN6 scrolling movement"
+    },
+    {
+      "testId": "L5_SCROLL_03_CHROME_PAGE_SCROLL",
+      "targetApplication": "com.android.chrome",
+      "targetRegion": "Web / Page Container",
+      "direction": "DOWN",
+      "expectedPhysicalOutcome": "Web page scrolls downward revealing lower content",
+      "userObservedResult": "PASS / FAIL",
+      "dispatchStatus": "SUCCESS / FAILED",
+      "verificationStatus": "CONFIRMED / NOT_CONFIRMED",
+      "notes": "User notes on actual TECNO IN6 scrolling movement"
+    }
+  ]
+}

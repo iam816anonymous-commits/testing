@@ -407,6 +407,8 @@ fun DiagnosticControlCenter(context: Context) {
     val coroutineScope = rememberCoroutineScope()
 
     val isAccessibilityEnabled by AutomationAccessibilityService.isServiceEnabled.collectAsState()
+    val diagnosticState by AutomationAccessibilityService.diagnosticState.collectAsState()
+    val crossAppObservationState by AutomationAccessibilityService.crossAppObservationState.collectAsState()
     val isScreenAuthorized by ScreenObservationProvider.isAuthorized.collectAsState()
     val isCameraRunning by CameraObservationProvider.isCameraRunning.collectAsState()
     val agentState by AgentCore.agentState.collectAsState()
@@ -415,6 +417,15 @@ fun DiagnosticControlCenter(context: Context) {
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var statusText by remember { mutableStateOf("Ready") }
+
+    var currentSnapshot by remember { mutableStateOf<UiSnapshot?>(null) }
+    var lastScreenObservationResult by remember { mutableStateOf<CurrentObservation?>(null) }
+
+    var targetQueryText by remember { mutableStateOf("Search") }
+    var targetResolutionResult by remember { mutableStateOf<TargetResolutionResult?>(null) }
+    var autoDetectResult by remember { mutableStateOf<AutoDetectResult?>(null) }
+    var mechanismAvailability by remember { mutableStateOf<MechanismAvailability?>(null) }
+    var interactionMap by remember { mutableStateOf<ScreenInteractionMap?>(null) }
 
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
@@ -494,6 +505,272 @@ fun DiagnosticControlCenter(context: Context) {
                         fontSize = 10.sp
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 1 Accessibility Diagnostics Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = if (diagnosticState.serviceConnected) Color(0xFFE8F5E9) else Color(0xFFFFF3E0))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 1 ACCESSIBILITY DIAGNOSTICS",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (diagnosticState.serviceConnected) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    )
+                    Text(
+                        text = if (diagnosticState.serviceConnected) "CONNECTED" else "DISCONNECTED",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = if (diagnosticState.serviceConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Created: ${diagnosticState.serviceCreated} | Connected: ${diagnosticState.serviceConnected} | ConnTime: ${diagnosticState.connectedTimestamp}", fontSize = 10.sp)
+                Text("Events: count=${diagnosticState.eventCount} | lastType=${diagnosticState.lastEventType} | lastTime=${diagnosticState.lastEventTimestamp}", fontSize = 10.sp)
+                Text("Active Package: ${diagnosticState.activePackage}", fontSize = 10.sp)
+                Text("Root Window: available=${diagnosticState.rootAvailable} | class=${diagnosticState.rootNodeClass} | children=${diagnosticState.rootNodeChildCount}", fontSize = 10.sp)
+                Text("Observation Time: ${diagnosticState.observationTimestamp} | Disconnected: ${diagnosticState.serviceDisconnected} (${diagnosticState.disconnectTimestamp})", fontSize = 10.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 2 Screen Observation & Perception Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE1F5FE))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 2 SCREEN OBSERVATION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFF0277BD)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(
+                            onClick = {
+                                val service = AutomationAccessibilityService.instance
+                                currentSnapshot = service?.refreshCurrentScreenObservation()
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("REFRESH CURRENT SCREEN", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val provider = ScreenObservationProvider(context)
+                                    lastScreenObservationResult = provider.captureObservation()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("CAPTURE SCREENSHOT", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                val snap = currentSnapshot
+                if (snap == null) {
+                    Text("No screen observation captured yet. Tap REFRESH CURRENT SCREEN.", fontSize = 10.sp, color = Color.Gray)
+                } else {
+                    Text("Package: ${snap.packageName} | Root Available: ${snap.isRootAvailable}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Nodes: total=${snap.totalNodeCount} | text=${snap.textNodeCount} | clickable=${snap.clickableNodeCount} | editable=${snap.editableNodeCount} | scrollable=${snap.scrollableNodeCount} | focused=${snap.focusedNodeCount}", fontSize = 10.sp)
+                    Text("Traversal Duration: ${snap.traversalDurationMs} ms | Timestamp: ${snap.timestamp}", fontSize = 10.sp)
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Observed UI Elements (Top 10):", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF01579B))
+                    snap.allNodes.take(10).forEachIndexed { idx, node ->
+                        Text(
+                            text = "${idx + 1}. [${node.className?.substringAfterLast('.') ?: "View"}] text=\"${node.text ?: ""}\" desc=\"${node.contentDescription ?: ""}\" editable=${node.isEditable} clickable=${node.isClickable} bounds=${node.boundsInScreen ?: "[]"}",
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+
+                if (lastScreenObservationResult != null) {
+                    val obs = lastScreenObservationResult!!
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("MediaProjection Diagnostic:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00695C))
+                    Text("Status: ${obs.stateSignature} | Dim: ${obs.width}x${obs.height} | Change: ${obs.visualChangeState}", fontSize = 10.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 2 Extension: Cross-App Observation Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = if (crossAppObservationState.observationActive) Color(0xFFE8F5E9) else Color(0xFFECEFF1))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "CROSS-APP OBSERVATION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = if (crossAppObservationState.observationActive) Color(0xFF2E7D32) else Color(0xFF37474F)
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val nextActive = !crossAppObservationState.observationActive
+                            service?.setCrossAppObservationActive(nextActive)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (crossAppObservationState.observationActive) Color(0xFFC62828) else Color(0xFF2E7D32)
+                        ),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (crossAppObservationState.observationActive) "STOP CROSS-APP" else "START CROSS-APP",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Active: ${crossAppObservationState.observationActive} | App: ${crossAppObservationState.foregroundPackage}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("Root: ${crossAppObservationState.rootAvailable} | Class: ${crossAppObservationState.foregroundClass.substringAfterLast('.')}", fontSize = 10.sp)
+                Text("Nodes: total=${crossAppObservationState.nodeCount} | text=${crossAppObservationState.textNodeCount} | clickable=${crossAppObservationState.clickableCount} | editable=${crossAppObservationState.editableCount} | scrollable=${crossAppObservationState.scrollableCount}", fontSize = 10.sp)
+                Text("Events: count=${crossAppObservationState.eventCount} | type=${crossAppObservationState.lastEventType}", fontSize = 10.sp)
+                Text("Observation Timestamp: ${crossAppObservationState.observationTimestamp}", fontSize = 10.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Layer 3 Target Discovery & Auto Detect Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LAYER 3 TARGET DISCOVERY (READ-ONLY)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFFF57F17)
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val snap = currentSnapshot ?: service?.refreshCurrentScreenObservation()
+                            if (snap != null) {
+                                val resolver = ActionResolver()
+                                autoDetectResult = resolver.autoDetectScreen(snap)
+                                interactionMap = resolver.generateInteractionMap(snap)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57F17)),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text("AUTO DETECT", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = targetQueryText,
+                        onValueChange = { targetQueryText = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Target Request", fontSize = 10.sp) },
+                        maxLines = 1
+                    )
+                    Button(
+                        onClick = {
+                            val service = AutomationAccessibilityService.instance
+                            val snap = currentSnapshot ?: service?.refreshCurrentScreenObservation()
+                            if (snap != null && targetQueryText.isNotBlank()) {
+                                val resolver = ActionResolver()
+                                val req = TargetRequest(requestedText = targetQueryText.trim())
+                                val res = resolver.discoverTarget(snap, req)
+                                targetResolutionResult = res
+                                mechanismAvailability = resolver.reportMechanismAvailability(res.match?.node)
+                            }
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("DISCOVER TARGET", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                val targetRes = targetResolutionResult
+                if (targetRes != null) {
+                    Text("Status: ${targetRes.status.name} | Candidates: ${targetRes.candidateCount} | Ambiguous: ${targetRes.isAmbiguous}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Explanation: ${targetRes.explanation}", fontSize = 10.sp)
+                    if (targetRes.match != null) {
+                        val m = targetRes.match
+                        Text("Matched Node: text=\"${m.node.text ?: ""}\" class=${m.node.className?.substringAfterLast('.')} bounds=${m.node.boundsInScreen}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                        Text("Match Method: ${m.matchMethod} | Confidence: ${m.confidence} | Reason: ${m.reason}", fontSize = 10.sp)
+                    }
+                }
+
+                val mech = mechanismAvailability
+                if (mech != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Mechanism Availability Report:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                    Text("Preferred: ${mech.preferredMechanism} | Click: ${mech.accessibilityClick} | ParentClick: ${mech.clickableParent} | Gesture: ${mech.gestureFallback} | Text: ${mech.setTextCompatible}", fontSize = 9.sp)
+                }
+
+                val autoDet = autoDetectResult
+                if (autoDet != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Auto Detect Screen Summary:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00838F))
+                    Text("App: ${autoDet.packageName} | Total Nodes: ${autoDet.totalNodeCount} | Interactive: ${autoDet.interactiveCount} | Editable: ${autoDet.editableCount} | Scrollable: ${autoDet.scrollableCount}", fontSize = 9.sp)
+                }
+
+                val imap = interactionMap
+                if (imap != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Interaction Map (${imap.interactiveElementsCount} elements):", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF283593))
+                    imap.elements.take(5).forEach { el ->
+                        Text("#${el.index} [${el.className?.substringAfterLast('.')}] text=\"${el.text ?: ""}\" desc=\"${el.contentDescription ?: ""}\" bounds=${el.bounds}", fontSize = 8.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+                Text("Note: Read-only target discovery mode. NO ACTION DISPATCHED.", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD84315))
             }
         }
 
