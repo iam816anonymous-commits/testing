@@ -1,54 +1,41 @@
-# PHASE 3.5 DEEP INTERACTION HARDENING REPORT
+# PHASE 3.5 FINAL INTERACTION HARDENING REPORT
 
-**Device Specification Baseline:**
-```text
-TECNO IN6
-Android 8.1
-API 27
-~4 GB RAM
-~64 GB storage
-```
+**Target Device:** TECNO IN6 / Android 8.1 / API 27 / ~4 GB RAM / ~64 GB Storage
+**Audit Statement:** NO PHYSICAL SUCCESS CLAIM WAS MADE WITHOUT DEVICE EVIDENCE.
 
 ---
 
-## 1. ROOT CAUSE ANALYSES & RESOLUTIONS
+## 1. ROOT CAUSES AND FIXES
 
-### Problem 1: Safe Physical Tests Unexpectedly Navigated Device to Home
-- **Problem:** Tapping "Run Safe Physical Tests" displaced the user's active application and navigated the phone to the Android Home launcher.
-- **Root Cause:** `PhysicalTestRegistry.buildSafeValidationSuite()` included `TEST-PHY-001` (`GO_HOME`) which directly invoked `AndroidAutomationCompat.performGlobalHome()`.
-- **Change & Fix:** Re-categorized `TEST-PHY-001` and `TEST-PHY-002` under `PhysicalTestCategory.NAVIGATION`. Made `TEST-PHY-001` audit accessibility capability non-destructively without executing global Home navigation. Enforced `ExecutionPolicy` (`READ_ONLY`, `INTERACTION`, `NAVIGATION`) so non-navigational test runs never displace the foreground application.
+### Problem 1: "Run Safe Physical Tests" Navigated to Home
+- **Root Cause:** `PhysicalTestRegistry.buildSafeValidationSuite()` included `TEST-PHY-001` which dispatched `AndroidAutomationCompat.performGlobalHome()`.
+- **Fix:** Re-categorized `TEST-PHY-001` as `NAVIGATION` and converted it to a non-destructive capability audit. Enforced `ExecutionPolicy.READ_ONLY` so tests preserve the foreground app.
 
-### Problem 2: Floating Overlay Was Not Movable/Draggable
-- **Problem:** The floating overlay icon was fixed on screen and could not be dragged by the user.
-- **Root Cause:** The overlay view lacked pointer movement tracking and distance threshold evaluations.
-- **Change & Fix:** Implemented a touch gesture state machine in `AutomationAccessibilityService.kt` (`ACTION_DOWN` -> `ACTION_MOVE` with `touchSlop` distance threshold -> `ACTION_UP`). Small taps toggle menu expansion; drags smoothly move the overlay icon using `WindowManager.updateViewLayout` with position clamping inside screen bounds.
+### Problem 2: Floating Overlay Was Fixed
+- **Root Cause:** Lacked gesture movement tracking.
+- **Fix:** Implemented pointer tracking using `touchSlop` in `AutomationAccessibilityService.kt`. Dragging moves the icon within screen bounds.
 
-### Problem 3: Layer 3 Target Discovery Hardcoded "Search"
-- **Problem:** Layer 3 target discovery in the overlay relied on a hardcoded "Search" text string.
-- **Root Cause:** The overlay static view fallback rendered "Search" rather than pulling live interaction surfaces from the active `UiSnapshot`.
-- **Change & Fix:** Updated `ActionResolver.kt` and `AutomationAccessibilityService.kt` to extract dynamic `InteractionSurface` items from the current foreground application (`YouTube`, `Chrome`, `Settings`). Surfaces render dynamically in `OverlayMenuView.L3_TARGET`.
+### Problem 3: Layer 3 Hardcoded "Search"
+- **Root Cause:** Hardcoded static search text.
+- **Fix:** Rebuilt `ActionResolver.kt` to extract dynamic `InteractionSurface` items from live UI snapshots across `YouTube`, `Chrome`, and `Settings`.
 
-### Problem 4: Layer 5 Scroll Execution Was Intermittent
-- **Problem:** Layer 5 scrolling failed or produced unpredictable movements across applications.
-- **Root Cause:** Gesture swipe fallbacks used generic display metrics percentages (`0.75` -> `0.25` screen height) without respecting container bounds.
-- **Change & Fix:** Updated `DeviceActionExecutor.performScroll()` to derive start/end touch coordinates strictly within the selected scroll container's observed `boundsRect` (leaving 20% safe margins from top/bottom/edges).
+### Problem 4: Intermittent Layer 5 Scrolling
+- **Root Cause:** Gesture swipe fallbacks used screen height percentages (`0.75` -> `0.25`).
+- **Fix:** Bound swipe start/end coordinates strictly within the observed scroll container's `boundsRect` (leaving 20% safe margins).
 
 ---
 
-## 2. HARDENING SUMMARY BY LAYER
+## 2. ARCHITECTURE SUMMARY
 
-| Component | Root Cause | Fix Applied | Verification Method |
-|---|---|---|---|
-| **Safe Test Runner** | `TEST-PHY-001` executed `performGlobalHome()` | Made capability check non-destructive & categorized as `NAVIGATION` | Unit test in `PhysicalTestRunnerTest.kt` |
-| **Floating Overlay** | Static click listener only | Implemented touch slop gesture tracking for drag & tap | Unit test in `LayerValidationTest.kt` |
-| **Layer 3 Discovery** | Hardcoded "Search" text | Extracts dynamic `InteractionSurface` items from live snapshot | Unit test in `LayerValidationTest.kt` |
-| **Layer 4 Touch** | Pre-dispatch signature drift | Re-observes active window & checks target freshness | Unit test in `LayerValidationTest.kt` |
-| **Layer 5 Scroll** | Display percentage swipe fallback | Container-bounded gesture coordinates with 20% safe padding | Unit test in `LayerValidationTest.kt` |
+- **Layer 3:** Generic `InteractionSurface` model with dynamic role inference (`BUTTON`, `EDITABLE`, `SCROLL_CONTAINER`, `TEXT`).
+- **Layer 4:** Target freshness check (`TARGET_STALE`), ancestor clickable node walking, single-click dispatch, debouncing.
+- **Layer 5:** Container-bounded gesture swipe geometry, movement confirmation via text set and signature diffing.
+- **Overlay:** Non-polluting floating control surface with touch slop dragging and menu navigation.
 
 ---
 
-## 3. VERIFICATION STATUS
+## 3. VERIFICATION & UNIT TESTS
 
-- **Unit Tests:** 185 unit tests passing 100% cleanly (`./gradlew test`).
-- **Build Verification:** Debug APK compiles cleanly without errors (`./gradlew assembleDebug`).
-- **Physical Validation:** Explicitly marked **PENDING USER PHYSICAL TESTING** on physical TECNO IN6 device.
+- **Unit Tests:** 185 tests passing 100% cleanly (`./gradlew test`).
+- **Build Verification:** Debug APK compiles cleanly (`./gradlew assembleDebug`).
+- **Physical Verification Status:** Pending manual device verification on TECNO IN6.
