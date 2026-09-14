@@ -57,6 +57,16 @@ data class InteractionSurface(
     val confidence: Double = 1.0
 )
 
+enum class FocusState {
+    NO_FOCUS,
+    FOCUS_REQUESTED,
+    FOCUSING,
+    FOCUSED,
+    FOCUS_LOST,
+    FOCUS_FAILED,
+    FOCUS_UNCONFIRMED
+}
+
 enum class SurfaceRole {
     BUTTON,
     EDITABLE,
@@ -261,6 +271,7 @@ enum class ActionType {
     WAIT_FOR_TEXT,
     CLICK_TEXT,
     LONG_CLICK,
+    FOCUS,
     TYPE_TEXT,
     CLEAR_TEXT,
     SCROLL,

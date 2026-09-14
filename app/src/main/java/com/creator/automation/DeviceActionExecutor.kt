@@ -116,6 +116,7 @@ class DeviceActionExecutor(
             ActionType.WAIT_FOR_TEXT, ActionType.VERIFY_TEXT -> performWaitForText(action.targetValue, action.timeoutMs, service)
             ActionType.CLICK_TEXT -> performClickText(action.targetValue, service, beforeSnapshot, beforeStateSig)
             ActionType.LONG_CLICK -> performLongClick(action.targetValue, beforeSnapshot)
+            ActionType.FOCUS -> performFocus(action.targetValue, service, beforeSnapshot)
             ActionType.TYPE_TEXT -> performTypeText(action.targetValue, action.inputData, service, beforeSnapshot)
             ActionType.CLEAR_TEXT -> performClearText(action.targetValue, beforeSnapshot)
             ActionType.PRESS_ENTER, ActionType.SUBMIT_INPUT -> performSubmitInput(service, beforeSnapshot)
@@ -455,6 +456,48 @@ class DeviceActionExecutor(
             matchedNode = match.node,
             matchMethod = match.matchMethod,
             message = "$finalVerification: Click dispatched (uiChanged=$uiChanged, packageChanged=$packageChanged)"
+        )
+    }
+
+    private suspend fun performFocus(
+        targetLabel: String?,
+        service: AutomationAccessibilityService,
+        snapshot: UiSnapshot
+    ): ActionResult {
+        val freshRoot = service.getRootNode()
+        val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
+
+        val res = if (!targetLabel.isNullOrBlank()) {
+            actionResolver.resolveTargetWithAmbiguity(freshSnapshot, targetLabel)
+        } else {
+            actionResolver.resolveEditableTarget(freshSnapshot, null)
+        }
+
+        val match = res.match
+        if (match == null) {
+            return ActionResult(status = ActionResultStatus.NOT_FOUND, reason = ExecutionReason.UI_NOT_FOUND, message = "Focus target not found")
+        }
+
+        val nodeRef = match.node.nodeRef as? AccessibilityNodeInfo
+            ?: return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "Node reference missing")
+
+        val focusDispatched = nodeRef.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        nodeRef.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
+        kotlinx.coroutines.delay(300L)
+        val afterRoot = service.getRootNode()
+        val afterSnapshot = ActionResolver.captureSnapshot(afterRoot, service.packageName ?: "")
+
+        val isFocusedConfirmed = afterSnapshot.allNodes.any { it.isFocused && (it.viewIdResourceName == match.node.viewIdResourceName || it.text == match.node.text) } ||
+                afterSnapshot.focusedNodes.isNotEmpty()
+
+        val verificationMsg = if (isFocusedConfirmed) "FOCUS_CONFIRMED" else if (focusDispatched) "FOCUS_UNCONFIRMED" else "FOCUS_FAILED"
+
+        return ActionResult(
+            status = if (isFocusedConfirmed || focusDispatched) ActionResultStatus.SUCCESS else ActionResultStatus.FAILED,
+            matchedNode = match.node,
+            matchMethod = match.matchMethod,
+            message = verificationMsg
         )
     }
 

@@ -17,6 +17,9 @@ enum class OverlayMenuView {
     L3_TARGET,
     L4_TOUCH,
     L5_SCROLL,
+    L6_FOCUS,
+    L7_INPUT,
+    L8_SUBMIT,
     DETAILS,
     TRACE
 }
@@ -87,8 +90,11 @@ class LayerValidationController(
         private val _currentMenuView = MutableStateFlow(OverlayMenuView.MAIN_MENU)
         val currentMenuView: StateFlow<OverlayMenuView> = _currentMenuView.asStateFlow()
 
-        private val _activeSearchQuery = MutableStateFlow("Search")
+        private val _activeSearchQuery = MutableStateFlow("")
         val activeSearchQuery: StateFlow<String> = _activeSearchQuery.asStateFlow()
+
+        private val _typeInputText = MutableStateFlow("")
+        val typeInputText: StateFlow<String> = _typeInputText.asStateFlow()
 
         var instance: LayerValidationController? = null
             private set
@@ -115,6 +121,10 @@ class LayerValidationController(
             _activeSearchQuery.value = query
         }
 
+        fun setTypeInputText(text: String) {
+            _typeInputText.value = text
+        }
+
         fun resetForTesting() {
             _retainedTarget.value = null
             _lastValidationTrace.value = null
@@ -122,7 +132,8 @@ class LayerValidationController(
             _selectedScrollDirection.value = "DOWN"
             _isOverlayExpanded.value = false
             _currentMenuView.value = OverlayMenuView.MAIN_MENU
-            _activeSearchQuery.value = "Search"
+            _activeSearchQuery.value = ""
+            _typeInputText.value = ""
             _layerStatus.value = ValidationLayerStatus()
             instance = null
         }
@@ -312,6 +323,164 @@ class LayerValidationController(
 
         _lastValidationTrace.value = trace
         Log.i(TAG, "LAYER_4_TRACE: target='$targetLabel', dispatch=${trace.dispatchResult}, verify=${trace.verificationStatus}, confirmed=${trace.isConfirmed}")
+        return trace
+    }
+
+    /**
+     * Executes a Layer 6 (Focus) physical test action using the production execution path.
+     */
+    suspend fun executeLayer6FocusTest(
+        service: AutomationAccessibilityService
+    ): LayerValidationTrace {
+        val beforeRoot = service.getRootNode()
+        val beforeSnapshot = ActionResolver.captureSnapshot(beforeRoot, service.packageName ?: "")
+        val beforeSig = StateSignatureGenerator.generateSignature(beforeSnapshot)
+
+        val retained = _retainedTarget.value
+        val targetLabel = retained?.candidate?.text
+            ?: retained?.candidate?.contentDescription
+            ?: retained?.candidate?.viewId
+            ?: retained?.sourceQuery
+
+        val executor = deviceActionExecutor ?: DeviceActionExecutor(service.applicationContext)
+        val action = AutomationAction(type = ActionType.FOCUS, targetValue = targetLabel)
+
+        val actionResult = executor.executeAndAudit(
+            workflowId = "LAYER_6_VALIDATION_TEST",
+            action = action,
+            service = service,
+            trigger = ExecutionTrigger.MANUAL
+        )
+
+        val afterSnapshot = actionResult.snapshot ?: ActionResolver.captureSnapshot(service.getRootNode(), service.packageName ?: "")
+        val afterSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+        val isConfirmed = actionResult.message?.contains("FOCUS_CONFIRMED") == true
+        val verificationStatusStr = if (isConfirmed) "FOCUS_CONFIRMED" else if (actionResult.status == ActionResultStatus.SUCCESS) "FOCUS_UNCONFIRMED" else "FOCUS_FAILED"
+
+        val trace = LayerValidationTrace(
+            layer = 6,
+            actionType = "FOCUS",
+            foregroundPackage = beforeSnapshot.packageName,
+            targetIdentifier = targetLabel ?: "FIRST_EDITABLE",
+            resolutionStatus = if (actionResult.status != ActionResultStatus.NOT_FOUND) "RESOLVED" else "NOT_FOUND",
+            mechanism = "Accessibility ACTION_FOCUS",
+            dispatchAttempted = true,
+            dispatchResult = actionResult.status.name,
+            beforeStateSignature = beforeSig,
+            afterStateSignature = afterSig,
+            verificationStatus = verificationStatusStr,
+            isConfirmed = isConfirmed,
+            failureReason = if (!isConfirmed) actionResult.message else null
+        )
+
+        _lastValidationTrace.value = trace
+        Log.i(TAG, "LAYER_6_TRACE: target='$targetLabel', dispatch=${trace.dispatchResult}, verify=${trace.verificationStatus}, confirmed=${trace.isConfirmed}")
+        return trace
+    }
+
+    /**
+     * Executes a Layer 7 (Text Input) physical test action using the production execution path.
+     */
+    suspend fun executeLayer7InputTest(
+        service: AutomationAccessibilityService,
+        inputText: String
+    ): LayerValidationTrace {
+        val beforeRoot = service.getRootNode()
+        val beforeSnapshot = ActionResolver.captureSnapshot(beforeRoot, service.packageName ?: "")
+        val beforeSig = StateSignatureGenerator.generateSignature(beforeSnapshot)
+
+        val retained = _retainedTarget.value
+        val targetLabel = retained?.candidate?.text
+            ?: retained?.candidate?.contentDescription
+            ?: retained?.candidate?.viewId
+            ?: retained?.sourceQuery
+
+        val executor = deviceActionExecutor ?: DeviceActionExecutor(service.applicationContext)
+        val action = AutomationAction(
+            type = ActionType.TYPE_TEXT,
+            targetValue = targetLabel,
+            inputData = inputText
+        )
+
+        val actionResult = executor.executeAndAudit(
+            workflowId = "LAYER_7_VALIDATION_TEST",
+            action = action,
+            service = service,
+            trigger = ExecutionTrigger.MANUAL
+        )
+
+        val afterSnapshot = actionResult.snapshot ?: ActionResolver.captureSnapshot(service.getRootNode(), service.packageName ?: "")
+        val afterSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+        val isVerified = actionResult.message?.contains("VERIFIED_SUCCESS") == true
+        val verificationStatusStr = if (isVerified) "TEXT_INPUT_CONFIRMED" else if (actionResult.status == ActionResultStatus.SUCCESS) "TEXT_INPUT_UNCONFIRMED" else "TEXT_INPUT_FAILED"
+
+        val trace = LayerValidationTrace(
+            layer = 7,
+            actionType = "TYPE_TEXT",
+            foregroundPackage = beforeSnapshot.packageName,
+            targetIdentifier = targetLabel ?: "EDITABLE_FIELD",
+            resolutionStatus = if (actionResult.status != ActionResultStatus.NOT_FOUND) "RESOLVED" else "NOT_FOUND",
+            mechanism = "Accessibility ACTION_SET_TEXT",
+            dispatchAttempted = true,
+            dispatchResult = actionResult.status.name,
+            beforeStateSignature = beforeSig,
+            afterStateSignature = afterSig,
+            verificationStatus = verificationStatusStr,
+            isConfirmed = isVerified,
+            failureReason = if (!isVerified) actionResult.message else null
+        )
+
+        _lastValidationTrace.value = trace
+        Log.i(TAG, "LAYER_7_TRACE: input='$inputText', dispatch=${trace.dispatchResult}, verify=${trace.verificationStatus}, confirmed=${trace.isConfirmed}")
+        return trace
+    }
+
+    /**
+     * Executes a Layer 8 (Submit) physical test action using the production execution path.
+     */
+    suspend fun executeLayer8SubmitTest(
+        service: AutomationAccessibilityService
+    ): LayerValidationTrace {
+        val beforeRoot = service.getRootNode()
+        val beforeSnapshot = ActionResolver.captureSnapshot(beforeRoot, service.packageName ?: "")
+        val beforeSig = StateSignatureGenerator.generateSignature(beforeSnapshot)
+
+        val executor = deviceActionExecutor ?: DeviceActionExecutor(service.applicationContext)
+        val action = AutomationAction(type = ActionType.SUBMIT_INPUT)
+
+        val actionResult = executor.executeAndAudit(
+            workflowId = "LAYER_8_VALIDATION_TEST",
+            action = action,
+            service = service,
+            trigger = ExecutionTrigger.MANUAL
+        )
+
+        val afterSnapshot = actionResult.snapshot ?: ActionResolver.captureSnapshot(service.getRootNode(), service.packageName ?: "")
+        val afterSig = StateSignatureGenerator.generateSignature(afterSnapshot)
+
+        val isConfirmed = beforeSig != afterSig || beforeSnapshot.packageName != afterSnapshot.packageName
+        val verificationStatusStr = if (isConfirmed) "SUBMIT_CONFIRMED" else if (actionResult.status == ActionResultStatus.SUCCESS) "SUBMIT_UNCONFIRMED" else "SUBMIT_FAILED"
+
+        val trace = LayerValidationTrace(
+            layer = 8,
+            actionType = "SUBMIT_INPUT",
+            foregroundPackage = beforeSnapshot.packageName,
+            targetIdentifier = actionResult.matchedNode?.text ?: actionResult.matchedNode?.viewIdResourceName ?: "SUBMIT_CONTROL",
+            resolutionStatus = if (actionResult.status != ActionResultStatus.NOT_FOUND) "RESOLVED" else "NOT_FOUND",
+            mechanism = actionResult.matchMethod ?: "Semantic Submit Control",
+            dispatchAttempted = true,
+            dispatchResult = actionResult.status.name,
+            beforeStateSignature = beforeSig,
+            afterStateSignature = afterSig,
+            verificationStatus = verificationStatusStr,
+            isConfirmed = isConfirmed,
+            failureReason = if (!isConfirmed) actionResult.message else null
+        )
+
+        _lastValidationTrace.value = trace
+        Log.i(TAG, "LAYER_8_TRACE: dispatch=${trace.dispatchResult}, verify=${trace.verificationStatus}, confirmed=${trace.isConfirmed}")
         return trace
     }
 

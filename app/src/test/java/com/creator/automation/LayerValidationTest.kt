@@ -216,6 +216,42 @@ class LayerValidationTest {
     }
 
     @Test
+    fun testLayer6FocusTestExecution() {
+        val service = org.robolectric.Robolectric.buildService(AutomationAccessibilityService::class.java).create().get()
+        kotlinx.coroutines.runBlocking {
+            val trace = controller.executeLayer6FocusTest(service)
+            assertEquals(6, trace.layer)
+            assertEquals("FOCUS", trace.actionType)
+            assertTrue(trace.dispatchAttempted)
+            assertNotNull(trace.verificationStatus)
+        }
+    }
+
+    @Test
+    fun testLayer7InputTestExecution() {
+        val service = org.robolectric.Robolectric.buildService(AutomationAccessibilityService::class.java).create().get()
+        kotlinx.coroutines.runBlocking {
+            val trace = controller.executeLayer7InputTest(service, "Test Hello World")
+            assertEquals(7, trace.layer)
+            assertEquals("TYPE_TEXT", trace.actionType)
+            assertTrue(trace.dispatchAttempted)
+            assertNotNull(trace.verificationStatus)
+        }
+    }
+
+    @Test
+    fun testLayer8SubmitTestExecution() {
+        val service = org.robolectric.Robolectric.buildService(AutomationAccessibilityService::class.java).create().get()
+        kotlinx.coroutines.runBlocking {
+            val trace = controller.executeLayer8SubmitTest(service)
+            assertEquals(8, trace.layer)
+            assertEquals("SUBMIT_INPUT", trace.actionType)
+            assertTrue(trace.dispatchAttempted)
+            assertNotNull(trace.verificationStatus)
+        }
+    }
+
+    @Test
     fun testDiscoverInteractionSurfacesExtraction() {
         val snap = createSampleSnapshot(packageName = "com.example.app", text = "Search Bar", isScrollable = true)
         val surfaces = actionResolver.discoverInteractionSurfaces(snap)

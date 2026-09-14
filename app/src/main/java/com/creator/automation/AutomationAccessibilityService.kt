@@ -94,10 +94,15 @@ class AutomationAccessibilityService : AccessibilityService() {
             Log.i(TAG, "LEARNING_MODE_CHANGED: $mode")
         }
 
+        private var overlayX = 20
+        private var overlayY = 50
+
         var instance: AutomationAccessibilityService? = null
             private set
 
         fun resetDiagnosticsForTesting() {
+            overlayX = 20
+            overlayY = 50
             _diagnosticState.value = AccessibilityDiagnosticState()
             _crossAppObservationState.value = CrossAppObservationState()
             _isServiceEnabled.value = false
@@ -171,8 +176,8 @@ class AutomationAccessibilityService : AccessibilityService() {
                 width = WindowManager.LayoutParams.WRAP_CONTENT
                 height = WindowManager.LayoutParams.WRAP_CONTENT
                 gravity = Gravity.TOP or Gravity.START
-                x = 20
-                y = 50
+                x = overlayX
+                y = overlayY
             }
 
             val container = LinearLayout(this).apply {
@@ -183,56 +188,6 @@ class AutomationAccessibilityService : AccessibilityService() {
 
             overlayView = container
             overlayContainerView = container
-
-            val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
-            var initialX = 0
-            var initialY = 0
-            var initialTouchX = 0f
-            var initialTouchY = 0f
-            var isDragging = false
-
-            // Attach touch listener to header/drag handle so children receive touch events when expanded
-            val headerHandle = TextView(this).apply {
-                setTextColor(Color.GREEN)
-                textSize = 9.5f
-                text = "◉ AGENT CONSOLE (Drag / Tap)"
-                setPadding(0, 0, 0, 6)
-            }
-
-            headerHandle.setOnTouchListener { _, event ->
-                when (event.action) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
-                        initialX = layoutParams.x
-                        initialY = layoutParams.y
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
-                        isDragging = false
-                        true
-                    }
-                    android.view.MotionEvent.ACTION_MOVE -> {
-                        val dx = event.rawX - initialTouchX
-                        val dy = event.rawY - initialTouchY
-                        if (Math.hypot(dx.toDouble(), dy.toDouble()) > touchSlop) {
-                            isDragging = true
-                        }
-                        if (isDragging) {
-                            layoutParams.x = (initialX + dx.toInt()).coerceIn(0, 1000)
-                            layoutParams.y = (initialY + dy.toInt()).coerceIn(0, 2000)
-                            windowManager?.updateViewLayout(overlayView, layoutParams)
-                        }
-                        true
-                    }
-                    android.view.MotionEvent.ACTION_UP -> {
-                        if (!isDragging) {
-                            val expanded = !LayerValidationController.isOverlayExpanded.value
-                            LayerValidationController.setOverlayExpanded(expanded)
-                            renderOverlayContent()
-                        }
-                        true
-                    }
-                    else -> false
-                }
-            }
 
             renderOverlayContent()
 
@@ -269,6 +224,58 @@ class AutomationAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun attachDragAndTapListener(
+        view: View,
+        onTap: () -> Unit
+    ) {
+        val root = overlayView ?: return
+        val layoutParams = root.layoutParams as? WindowManager.LayoutParams ?: return
+        val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var isDragging = false
+
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    initialX = layoutParams.x
+                    initialY = layoutParams.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - initialTouchX
+                    val dy = event.rawY - initialTouchY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > touchSlop) {
+                        isDragging = true
+                    }
+                    if (isDragging) {
+                        val displayMetrics = resources.displayMetrics
+                        val maxX = (displayMetrics.widthPixels - 80).coerceAtLeast(0)
+                        val maxY = (displayMetrics.heightPixels - 120).coerceAtLeast(0)
+                        layoutParams.x = (initialX + dx.toInt()).coerceIn(0, maxX)
+                        layoutParams.y = (initialY + dy.toInt()).coerceIn(0, maxY)
+                        overlayX = layoutParams.x
+                        overlayY = layoutParams.y
+                        windowManager?.updateViewLayout(overlayView, layoutParams)
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        onTap()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
     private fun renderOverlayContent() {
         val container = overlayContainerView ?: return
         container.removeAllViews()
@@ -289,21 +296,26 @@ class AutomationAccessibilityService : AccessibilityService() {
                 setTextColor(Color.GREEN)
                 textSize = 9f
                 setBackgroundColor(Color.argb(200, 15, 23, 42))
-                text = "◉ AGENT CONSOLE\n${state.foregroundPackage}$targetStatusStr"
-                setOnClickListener {
-                    LayerValidationController.setOverlayExpanded(true)
-                    renderOverlayContent()
-                }
+                text = "◉ AGENT CONSOLE (Drag/Tap)\n${state.foregroundPackage}$targetStatusStr"
+            }
+            attachDragAndTapListener(collapsedBtn) {
+                LayerValidationController.setOverlayExpanded(true)
+                renderOverlayContent()
             }
             container.addView(collapsedBtn)
             return
         }
 
-        // Header
+        // Header / Drag Handle
         val headerTv = TextView(this).apply {
             setTextColor(Color.GREEN)
             textSize = 10f
-            text = "◉ CREATOR AGENT CONSOLE\nApp: ${state.foregroundPackage}"
+            text = "◉ CREATOR AGENT CONSOLE (Drag Handle)\nApp: ${state.foregroundPackage}"
+            setPadding(0, 0, 0, 6)
+        }
+        attachDragAndTapListener(headerTv) {
+            LayerValidationController.setOverlayExpanded(false)
+            renderOverlayContent()
         }
         container.addView(headerTv)
 
@@ -330,6 +342,30 @@ class AutomationAccessibilityService : AccessibilityService() {
                     textSize = 9f
                     setOnClickListener {
                         LayerValidationController.navigateMenuView(OverlayMenuView.L5_SCROLL)
+                        renderOverlayContent()
+                    }
+                }
+                val l6Btn = android.widget.Button(this).apply {
+                    text = "[ L6 ] FOCUS EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L6_FOCUS)
+                        renderOverlayContent()
+                    }
+                }
+                val l7Btn = android.widget.Button(this).apply {
+                    text = "[ L7 ] TEXT INPUT EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L7_INPUT)
+                        renderOverlayContent()
+                    }
+                }
+                val l8Btn = android.widget.Button(this).apply {
+                    text = "[ L8 ] SUBMIT EXECUTION"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.L8_SUBMIT)
                         renderOverlayContent()
                     }
                 }
@@ -366,6 +402,9 @@ class AutomationAccessibilityService : AccessibilityService() {
                 container.addView(l3Btn)
                 container.addView(l4Btn)
                 container.addView(l5Btn)
+                container.addView(l6Btn)
+                container.addView(l7Btn)
+                container.addView(l8Btn)
                 container.addView(statusTv)
                 container.addView(actionRow)
             }
@@ -563,6 +602,163 @@ class AutomationAccessibilityService : AccessibilityService() {
                     }
                 }
                 container.addView(detailsTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L6_FOCUS -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L6 FOCUS VALIDATION"
+                }
+
+                val targetTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "Target: '${retained.candidate.text ?: retained.sourceQuery}'" else "NO TARGET (Will Focus Editable)"
+                }
+
+                val testFocusBtn = android.widget.Button(this).apply {
+                    text = "TEST FOCUS"
+                    textSize = 9f
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer6FocusTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 6) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(targetTv)
+                container.addView(testFocusBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L7_INPUT -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L7 TEXT INPUT VALIDATION"
+                }
+
+                val targetTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = if (retained != null) "Target: '${retained.candidate.text ?: retained.sourceQuery}'" else "NO TARGET (Will Type into Focused Editable)"
+                }
+
+                val inputEt = android.widget.EditText(this).apply {
+                    hint = "Type text to inject into app field"
+                    textSize = 9f
+                    setTextColor(Color.WHITE)
+                    setHintTextColor(Color.GRAY)
+                    setText(LayerValidationController.typeInputText.value)
+                }
+
+                val testTypeBtn = android.widget.Button(this).apply {
+                    text = "TEST TYPE TEXT"
+                    textSize = 9f
+                    setOnClickListener {
+                        val input = inputEt.text.toString().trim()
+                        if (input.isNotBlank()) {
+                            LayerValidationController.setTypeInputText(input)
+                            serviceScope.launch {
+                                val traceRes = LayerValidationController.getOrCreateInstance().executeLayer7InputTest(this@AutomationAccessibilityService, input)
+                                mainHandler.post {
+                                    renderOverlayContent()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 7) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(targetTv)
+                container.addView(inputEt)
+                container.addView(testTypeBtn)
+                container.addView(resultTv)
+                container.addView(backBtn)
+            }
+
+            OverlayMenuView.L8_SUBMIT -> {
+                val titleTv = TextView(this).apply {
+                    setTextColor(Color.YELLOW)
+                    textSize = 10f
+                    text = "L8 SUBMIT VALIDATION"
+                }
+
+                val infoTv = TextView(this).apply {
+                    setTextColor(Color.WHITE)
+                    textSize = 9f
+                    text = "Discovers semantic submit/search controls on current screen"
+                }
+
+                val testSubmitBtn = android.widget.Button(this).apply {
+                    text = "TEST SUBMIT"
+                    textSize = 9f
+                    setOnClickListener {
+                        serviceScope.launch {
+                            val traceRes = LayerValidationController.getOrCreateInstance().executeLayer8SubmitTest(this@AutomationAccessibilityService)
+                            mainHandler.post {
+                                renderOverlayContent()
+                            }
+                        }
+                    }
+                }
+
+                val resultTv = TextView(this).apply {
+                    setTextColor(if (trace?.isConfirmed == true) Color.GREEN else Color.RED)
+                    textSize = 9f
+                    text = if (trace != null && trace.layer == 8) "Dispatch: ${trace.dispatchResult}\nVerify: ${trace.verificationStatus}" else "No execution yet"
+                }
+
+                val backBtn = android.widget.Button(this).apply {
+                    text = "BACK TO MAIN MENU"
+                    textSize = 9f
+                    setOnClickListener {
+                        LayerValidationController.navigateMenuView(OverlayMenuView.MAIN_MENU)
+                        renderOverlayContent()
+                    }
+                }
+
+                container.addView(titleTv)
+                container.addView(infoTv)
+                container.addView(testSubmitBtn)
+                container.addView(resultTv)
                 container.addView(backBtn)
             }
 
