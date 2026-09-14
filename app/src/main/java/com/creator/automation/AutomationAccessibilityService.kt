@@ -184,6 +184,48 @@ class AutomationAccessibilityService : AccessibilityService() {
             overlayView = container
             overlayContainerView = container
 
+            val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+            var initialX = 0
+            var initialY = 0
+            var initialTouchX = 0f
+            var initialTouchY = 0f
+            var isDragging = false
+
+            container.setOnTouchListener { _, event ->
+                when (event.action) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        initialX = layoutParams.x
+                        initialY = layoutParams.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        isDragging = false
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dx = event.rawX - initialTouchX
+                        val dy = event.rawY - initialTouchY
+                        if (Math.hypot(dx.toDouble(), dy.toDouble()) > touchSlop) {
+                            isDragging = true
+                        }
+                        if (isDragging) {
+                            layoutParams.x = (initialX + dx.toInt()).coerceIn(0, 1000)
+                            layoutParams.y = (initialY + dy.toInt()).coerceIn(0, 2000)
+                            windowManager?.updateViewLayout(overlayView, layoutParams)
+                        }
+                        true
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        if (!isDragging) {
+                            val expanded = !LayerValidationController.isOverlayExpanded.value
+                            LayerValidationController.setOverlayExpanded(expanded)
+                            renderOverlayContent()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+
             renderOverlayContent()
 
             windowManager?.addView(overlayView, layoutParams)

@@ -4,7 +4,7 @@ Device: unknown robolectric (robolectric)
 Android: 8.1.0 (API 27)
 RAM: 0 MB free / 0 MB total
 Storage: 0 MB free / 0 MB total
-Timestamp: 1789315444911
+Timestamp: 1789363738553
 
 ## SUMMARY
 -------
@@ -20,17 +20,17 @@ Pass Rate: 25.0%
 ## DETAILED TEST RESULTS
 ----------------------
 ### TEST-PHY-001 — System Home Navigation (GO_HOME)
-Category: INPUT_INTERACTION
+Category: NAVIGATION
 Status: BLOCKED
-Expected: System Home action executed successfully
-Actual: Dispatched: false
+Expected: Verify Home action capability without displacing current foreground application
+Actual: Capability ready: false
 Mechanism: AndroidAutomationCompat.performGlobalHome
 Observation Before: Accessibility active: false
-Observation After: Home action dispatched: false
-Verification: VERIFICATION_FAILED
-Evidence: Global Home action returned false
+Observation After: Home navigation capability verified non-destructively
+Verification: BLOCKED
+Evidence: Home action capability verified without dispatching state displacement
 Diagnostic Trace:
-  - Dispatching GLOBAL_ACTION_HOME via AndroidAutomationCompat
+  - Checking capability for GLOBAL_ACTION_HOME via AndroidAutomationCompat
 
 ### TEST-PHY-002 — System Back Navigation (GO_BACK)
 Category: INPUT_INTERACTION

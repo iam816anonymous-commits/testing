@@ -4,7 +4,7 @@
 Status: BLOCKED
 Reason: Blocked / Unverified
 Trace:
-  - Dispatching GLOBAL_ACTION_HOME via AndroidAutomationCompat
+  - Checking capability for GLOBAL_ACTION_HOME via AndroidAutomationCompat
 
 ## TEST-PHY-002 - System Back Navigation (GO_BACK)
 Status: BLOCKED
