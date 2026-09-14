@@ -57,6 +57,19 @@ data class InteractionSurface(
     val confidence: Double = 1.0
 )
 
+enum class SurfaceRole {
+    BUTTON,
+    EDITABLE,
+    SCROLL_CONTAINER,
+    CHECKBOX,
+    SWITCH,
+    IMAGE,
+    TAB,
+    LINK,
+    TEXT,
+    UNKNOWN
+}
+
 enum class ScrollAmount {
     SMALL,
     MEDIUM,

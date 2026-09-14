@@ -191,7 +191,15 @@ class AutomationAccessibilityService : AccessibilityService() {
             var initialTouchY = 0f
             var isDragging = false
 
-            container.setOnTouchListener { _, event ->
+            // Attach touch listener to header/drag handle so children receive touch events when expanded
+            val headerHandle = TextView(this).apply {
+                setTextColor(Color.GREEN)
+                textSize = 9.5f
+                text = "◉ AGENT CONSOLE (Drag / Tap)"
+                setPadding(0, 0, 0, 6)
+            }
+
+            headerHandle.setOnTouchListener { _, event ->
                 when (event.action) {
                     android.view.MotionEvent.ACTION_DOWN -> {
                         initialX = layoutParams.x

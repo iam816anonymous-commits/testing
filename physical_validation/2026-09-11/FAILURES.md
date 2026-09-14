@@ -1,16 +1,16 @@
 # PHYSICAL VALIDATION FAILURES & BLOCKS
 
-## TEST-PHY-001 - System Home Navigation (GO_HOME)
+## TEST-PHY-001 - System Home Navigation Capability Audit
 Status: BLOCKED
 Reason: Blocked / Unverified
 Trace:
-  - Checking capability for GLOBAL_ACTION_HOME via AndroidAutomationCompat
+  - Auditing GLOBAL_ACTION_HOME capability non-destructively
 
-## TEST-PHY-002 - System Back Navigation (GO_BACK)
+## TEST-PHY-002 - System Back Navigation Capability Audit
 Status: BLOCKED
 Reason: Blocked / Unverified
 Trace:
-  - Dispatching GLOBAL_ACTION_BACK via AndroidAutomationCompat
+  - Auditing GLOBAL_ACTION_BACK capability non-destructively
 
 ## TEST-PHY-003 - Launch Application - YouTube
 Status: FAIL

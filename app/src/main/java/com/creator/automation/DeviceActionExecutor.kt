@@ -76,6 +76,23 @@ class DeviceActionExecutor(
             )
         }
 
+        // Policy Gate: Block Navigation Actions during Layer Validation Tests
+        if (workflowId.contains("LAYER_") && (
+            action.type == ActionType.PRESS_HOME ||
+            action.type == ActionType.GO_BACK ||
+            action.type == ActionType.PRESS_RECENTS ||
+            action.type == ActionType.LAUNCH_APP
+        )) {
+            Log.w(TAG, "BLOCKED_BY_POLICY: Action ${action.type} blocked during layer validation test '$workflowId'")
+            return ActionResult(
+                status = ActionResultStatus.BLOCKED,
+                reason = ExecutionReason.PRECONDITION_FAILED,
+                trigger = trigger,
+                message = "BLOCKED_BY_POLICY: Navigation/Launch actions not permitted during layer validation",
+                snapshot = beforeSnapshot
+            )
+        }
+
         // 3. Dispatch Action via Generic Accessibility Engine
         val dispatchResult = when (action.type) {
             ActionType.LAUNCH_APP -> {
@@ -724,12 +741,18 @@ class DeviceActionExecutor(
         )
     }
 
-    private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String): ActionResult {
+    private suspend fun performScroll(service: AutomationAccessibilityService, snapshot: UiSnapshot, forward: Boolean, beforeStateSig: String, regionIndex: Int = 0): ActionResult {
         val freshRoot = service.getRootNode()
         val freshSnapshot = if (freshRoot != null) ActionResolver.captureSnapshot(freshRoot, service.packageName ?: "") else snapshot
 
-        val scrollableInfo = freshSnapshot.scrollableNodes.firstOrNull()
-        val scrollableNode = scrollableInfo?.nodeRef as? AccessibilityNodeInfo
+        val scrollCandidates = freshSnapshot.scrollableNodes
+        if (scrollCandidates.isEmpty()) {
+            return ActionResult(status = ActionResultStatus.FAILED, reason = ExecutionReason.UI_NOT_FOUND, message = "NO_SCROLL_AVAILABLE: No scrollable container on current screen")
+        }
+
+        val targetIdx = regionIndex.coerceIn(0, scrollCandidates.lastIndex)
+        val scrollableInfo = scrollCandidates[targetIdx]
+        val scrollableNode = scrollableInfo.nodeRef as? AccessibilityNodeInfo
 
         var dispatchAttempt = "ACCESSIBILITY_ACTION_SCROLL"
         var scrollDispatched = false

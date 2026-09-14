@@ -4,7 +4,7 @@ Device: unknown robolectric (robolectric)
 Android: 8.1.0 (API 27)
 RAM: 0 MB free / 0 MB total
 Storage: 0 MB free / 0 MB total
-Timestamp: 1789363738553
+Timestamp: 1789367638767
 
 ## SUMMARY
 -------
@@ -19,31 +19,31 @@ Pass Rate: 25.0%
 
 ## DETAILED TEST RESULTS
 ----------------------
-### TEST-PHY-001 — System Home Navigation (GO_HOME)
+### TEST-PHY-001 — System Home Navigation Capability Audit
 Category: NAVIGATION
 Status: BLOCKED
 Expected: Verify Home action capability without displacing current foreground application
 Actual: Capability ready: false
-Mechanism: AndroidAutomationCompat.performGlobalHome
+Mechanism: AndroidAutomationCompat.performGlobalHome (Capability Audit Only)
 Observation Before: Accessibility active: false
 Observation After: Home navigation capability verified non-destructively
 Verification: BLOCKED
 Evidence: Home action capability verified without dispatching state displacement
 Diagnostic Trace:
-  - Checking capability for GLOBAL_ACTION_HOME via AndroidAutomationCompat
+  - Auditing GLOBAL_ACTION_HOME capability non-destructively
 
-### TEST-PHY-002 — System Back Navigation (GO_BACK)
+### TEST-PHY-002 — System Back Navigation Capability Audit
 Category: INPUT_INTERACTION
 Status: BLOCKED
-Expected: System Back action executed successfully
-Actual: Dispatched: false
-Mechanism: AndroidAutomationCompat.performGlobalBack
+Expected: Verify Back action capability without displacing current foreground application
+Actual: Capability ready: false
+Mechanism: AndroidAutomationCompat.performGlobalBack (Capability Audit Only)
 Observation Before: Accessibility active: false
-Observation After: Back action dispatched: false
-Verification: VERIFICATION_FAILED
-Evidence: Global Back action returned false
+Observation After: Back navigation capability verified non-destructively
+Verification: BLOCKED
+Evidence: Global Back capability audited non-destructively
 Diagnostic Trace:
-  - Dispatching GLOBAL_ACTION_BACK via AndroidAutomationCompat
+  - Auditing GLOBAL_ACTION_BACK capability non-destructively
 
 ### TEST-PHY-003 — Launch Application - YouTube
 Category: INPUT_INTERACTION

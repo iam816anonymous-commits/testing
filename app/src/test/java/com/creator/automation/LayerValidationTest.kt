@@ -225,6 +225,6 @@ class LayerValidationTest {
         assertEquals("Search Bar", firstSurface.text)
         assertTrue(firstSurface.isClickable)
         assertTrue(firstSurface.isScrollable)
-        assertEquals("ScrollView", firstSurface.role)
+        assertEquals("SCROLL_CONTAINER", firstSurface.role)
     }
 }

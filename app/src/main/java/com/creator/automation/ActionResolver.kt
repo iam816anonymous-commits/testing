@@ -270,12 +270,7 @@ class ActionResolver {
         }
 
         return interactiveNodes.mapIndexed { idx, node ->
-            val role = when {
-                node.isEditable -> "EditText"
-                node.isScrollable -> "ScrollView"
-                node.isClickable -> node.className?.substringAfterLast(".") ?: "Button"
-                else -> node.className?.substringAfterLast(".") ?: "TextView"
-            }
+            val role = inferSurfaceRole(node)
 
             InteractionSurface(
                 index = idx + 1,
@@ -283,7 +278,7 @@ class ActionResolver {
                 contentDescription = node.contentDescription,
                 viewId = node.viewIdResourceName,
                 className = node.className,
-                role = role,
+                role = role.name,
                 isClickable = node.isClickable,
                 isEditable = node.isEditable,
                 isScrollable = node.isScrollable,
@@ -296,6 +291,25 @@ class ActionResolver {
                 stateSignature = stateSig,
                 confidence = if (!node.viewIdResourceName.isNullOrBlank()) 1.0 else if (!node.text.isNullOrBlank()) 0.95 else 0.75
             )
+        }
+    }
+
+    /**
+     * Infer surface role generically based on accessibility attributes and class name.
+     */
+    fun inferSurfaceRole(node: UiNodeInfo): SurfaceRole {
+        val cls = node.className?.lowercase() ?: ""
+        return when {
+            node.isEditable || cls.contains("edittext") -> SurfaceRole.EDITABLE
+            node.isScrollable || cls.contains("scrollview") || cls.contains("recyclerview") || cls.contains("listview") -> SurfaceRole.SCROLL_CONTAINER
+            cls.contains("checkbox") -> SurfaceRole.CHECKBOX
+            cls.contains("switch") || cls.contains("togglebutton") -> SurfaceRole.SWITCH
+            cls.contains("button") || (node.isClickable && !node.text.isNullOrBlank()) -> SurfaceRole.BUTTON
+            cls.contains("image") -> SurfaceRole.IMAGE
+            cls.contains("tab") -> SurfaceRole.TAB
+            cls.contains("url") || cls.contains("link") -> SurfaceRole.LINK
+            !node.text.isNullOrBlank() -> SurfaceRole.TEXT
+            else -> SurfaceRole.UNKNOWN
         }
     }
 
