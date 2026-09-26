@@ -1,0 +1,47 @@
+[
+  {
+    "testId": "L1-001",
+    "testName": "Service Connection",
+    "category": "ACCESSIBILITY_BINDING",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "serviceConnected == true on TECNO IN6",
+    "preconditions": "Settings -> Accessibility -> CreatorAutomation enabled",
+    "evidence": "Robolectric environment cannot bind live AccessibilityService IPC"
+  },
+  {
+    "testId": "L1-002",
+    "testName": "Real Accessibility Event",
+    "category": "EVENT_DELIVERY",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "eventCount > 0 and activePackage updated on navigation",
+    "preconditions": "Service connected on device",
+    "evidence": "Event dispatch requires physical touch / window transitions"
+  },
+  {
+    "testId": "L1-003",
+    "testName": "Active Window",
+    "category": "WINDOW_ACCESS",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "getRootInActiveWindow() returns active root info",
+    "preconditions": "Accessible window open on TECNO IN6",
+    "evidence": "Root node requires live AccessibilityWindowInfo from system"
+  },
+  {
+    "testId": "L1-004",
+    "testName": "Observation Snapshot",
+    "category": "OBSERVATION_FOUNDATION",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "UiSnapshot node count > 0 from active window",
+    "preconditions": "Root node available",
+    "evidence": "Snapshot parsing validated via synthetic fixtures in unit tests"
+  },
+  {
+    "testId": "L1-005",
+    "testName": "Service Lifecycle",
+    "category": "LIFECYCLE_DIAGNOSTICS",
+    "headlessStatus": "BLOCKED",
+    "physicalRequirement": "serviceConnected updates false -> true across toggle",
+    "preconditions": "Accessibility service toggled in system settings",
+    "evidence": "Lifecycle callback states exposed via diagnosticState flow"
+  }
+]

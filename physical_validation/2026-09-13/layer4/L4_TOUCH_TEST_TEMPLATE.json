@@ -1,0 +1,39 @@
+{
+  "testRunId": "LAYER_4_PHYSICAL_VALIDATION_TEMPLATE",
+  "device": "TECNO IN6 (Android 8.1 / API 27)",
+  "layer": 4,
+  "actionType": "CLICK",
+  "physicalVerificationRequired": true,
+  "tests": [
+    {
+      "testId": "L4_TOUCH_01_CHROME_CLICK",
+      "targetApplication": "com.android.chrome",
+      "targetDescription": "Search or type web address / Search button",
+      "expectedPhysicalOutcome": "Search address bar opens / keyboard appears",
+      "userObservedResult": "PASS / FAIL",
+      "dispatchStatus": "SUCCESS / FAILED",
+      "verificationStatus": "CONFIRMED / NOT_CONFIRMED",
+      "notes": "User notes on actual TECNO IN6 screen behavior"
+    },
+    {
+      "testId": "L4_TOUCH_02_YOUTUBE_CLICK",
+      "targetApplication": "com.google.android.youtube",
+      "targetDescription": "Search button / Home tab",
+      "expectedPhysicalOutcome": "Search overlay opens / feed updates",
+      "userObservedResult": "PASS / FAIL",
+      "dispatchStatus": "SUCCESS / FAILED",
+      "verificationStatus": "CONFIRMED / NOT_CONFIRMED",
+      "notes": "User notes on actual TECNO IN6 screen behavior"
+    },
+    {
+      "testId": "L4_TOUCH_03_SETTINGS_CLICK",
+      "targetApplication": "com.android.settings",
+      "targetDescription": "Network & internet / Display",
+      "expectedPhysicalOutcome": "Sub-settings menu opens",
+      "userObservedResult": "PASS / FAIL",
+      "dispatchStatus": "SUCCESS / FAILED",
+      "verificationStatus": "CONFIRMED / NOT_CONFIRMED",
+      "notes": "User notes on actual TECNO IN6 screen behavior"
+    }
+  ]
+}

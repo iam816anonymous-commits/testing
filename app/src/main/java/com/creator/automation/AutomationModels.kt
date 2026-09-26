@@ -2,10 +2,149 @@ package com.creator.automation
 
 import java.util.UUID
 
+data class TargetRequest(
+    val requestedText: String? = null,
+    val requestedContentDescription: String? = null,
+    val requestedViewId: String? = null,
+    val requestedRole: String? = null
+)
+
+data class TargetCandidate(
+    val node: UiNodeInfo,
+    val text: String? = node.text,
+    val contentDescription: String? = node.contentDescription,
+    val viewId: String? = node.viewIdResourceName,
+    val className: String? = node.className,
+    val isClickable: Boolean = node.isClickable,
+    val isEditable: Boolean = node.isEditable,
+    val isScrollable: Boolean = node.isScrollable,
+    val isFocused: Boolean = node.isFocused,
+    val isEnabled: Boolean = node.isEnabled,
+    val isVisibleToUser: Boolean = node.isVisibleToUser,
+    val bounds: String? = node.boundsInScreen,
+    val matchType: String = "UNKNOWN",
+    val score: Double = 0.0
+)
+
+data class MechanismAvailability(
+    val accessibilityClick: Boolean = false,
+    val clickableParent: Boolean = false,
+    val gestureFallback: Boolean = false,
+    val focusAvailable: Boolean = false,
+    val setTextCompatible: Boolean = false,
+    val preferredMechanism: String = "Accessibility Click",
+    val actionDispatched: Boolean = false
+)
+
+data class InteractionSurface(
+    val id: String = UUID.randomUUID().toString(),
+    val index: Int = 0,
+    val text: String? = null,
+    val contentDescription: String? = null,
+    val viewId: String? = null,
+    val className: String? = null,
+    val role: String? = null,
+    val isClickable: Boolean = false,
+    val isEditable: Boolean = false,
+    val isScrollable: Boolean = false,
+    val isFocused: Boolean = false,
+    val isEnabled: Boolean = true,
+    val bounds: String? = null,
+    val parentContext: String? = null,
+    val observationId: String = "",
+    val observationTimestamp: Long = System.currentTimeMillis(),
+    val stateSignature: String = "",
+    val confidence: Double = 1.0
+)
+
+enum class FocusState {
+    NO_FOCUS,
+    FOCUS_REQUESTED,
+    FOCUSING,
+    FOCUSED,
+    FOCUS_LOST,
+    FOCUS_FAILED,
+    FOCUS_UNCONFIRMED
+}
+
+enum class SurfaceRole {
+    BUTTON,
+    EDITABLE,
+    SCROLL_CONTAINER,
+    CHECKBOX,
+    SWITCH,
+    IMAGE,
+    TAB,
+    LINK,
+    TEXT,
+    UNKNOWN
+}
+
+enum class ScrollAmount {
+    SMALL,
+    MEDIUM,
+    LARGE
+}
+
+data class ScrollRequest(
+    val regionIdentifier: String? = null,
+    val regionIndex: Int = 0,
+    val direction: String = "DOWN", // "DOWN" or "UP"
+    val amount: ScrollAmount = ScrollAmount.MEDIUM,
+    val observationId: String = "",
+    val stateSignature: String = ""
+)
+
+data class ScreenInteractionElement(
+    val index: Int,
+    val text: String?,
+    val contentDescription: String?,
+    val viewId: String?,
+    val className: String?,
+    val isClickable: Boolean,
+    val isEditable: Boolean,
+    val isScrollable: Boolean,
+    val bounds: String?
+)
+
+data class ScreenInteractionMap(
+    val packageName: String,
+    val totalElements: Int,
+    val interactiveElementsCount: Int,
+    val elements: List<ScreenInteractionElement>
+)
+
+data class AutoDetectResult(
+    val packageName: String,
+    val isRootAvailable: Boolean,
+    val totalNodeCount: Int,
+    val interactiveCount: Int,
+    val editableCount: Int,
+    val scrollableCount: Int,
+    val targetDiscoveryAvailable: Boolean,
+    val visualFallbackAvailable: Boolean,
+    val actionDispatched: Boolean = false
+)
+
+data class Layer3TraceRecord(
+    val timestamp: Long = System.currentTimeMillis(),
+    val foregroundPackage: String,
+    val observationTimestamp: Long,
+    val targetRequest: String,
+    val candidateCount: Int,
+    val matchMethod: String,
+    val confidence: Double,
+    val bounds: String?,
+    val mechanisms: MechanismAvailability,
+    val actionDispatched: Boolean = false
+)
+
 data class UiSnapshot(
     val id: String = UUID.randomUUID().toString(),
     val packageName: String,
     val timestamp: Long = System.currentTimeMillis(),
+    val isRootAvailable: Boolean = true,
+    val traversalDurationMs: Long = 0L,
     val visibleTexts: List<String> = emptyList(),
     val contentDescriptions: List<String> = emptyList(),
     val viewIds: List<String> = emptyList(),
@@ -20,6 +159,8 @@ data class UiSnapshot(
     val clickableNodeCount: Int get() = clickableNodes.size
     val scrollableNodeCount: Int get() = scrollableNodes.size
     val editableNodeCount: Int get() = editableNodes.size
+    val focusedNodeCount: Int get() = focusedNodes.size
+    val textNodeCount: Int get() = visibleTexts.size
 }
 
 data class UiNodeInfo(
@@ -55,6 +196,50 @@ data class TargetBounds(
     val height: Int get() = bottom - top
 }
 
+enum class ValidationState {
+    NO_OBSERVATION,
+    OBSERVING,
+    OBSERVATION_READY,
+    TARGET_NOT_FOUND,
+    TARGET_AMBIGUOUS,
+    TARGET_FOUND,
+    TARGET_SELECTED,
+    TARGET_STALE,
+    ACTION_READY,
+    ACTION_DISPATCHING,
+    ACTION_DISPATCHED,
+    VERIFYING,
+    CONFIRMED,
+    NOT_CONFIRMED,
+    FAILED,
+    CANCELLED
+}
+
+enum class ValidationFailureReason {
+    NONE,
+    SERVICE_UNAVAILABLE,
+    ROOT_UNAVAILABLE,
+    OBSERVATION_STALE,
+    OBSERVATION_TIMEOUT,
+    TARGET_NOT_FOUND,
+    TARGET_AMBIGUOUS,
+    TARGET_STALE,
+    TARGET_DISABLED,
+    TARGET_NOT_ACTIONABLE,
+    INVALID_BOUNDS,
+    CLICK_DISPATCH_FAILED,
+    CLICK_NOT_CONFIRMED,
+    SCROLL_REGION_NOT_FOUND,
+    SCROLL_REGION_AMBIGUOUS,
+    SCROLL_REGION_STALE,
+    SCROLL_ACTION_UNAVAILABLE,
+    SCROLL_DISPATCH_FAILED,
+    SCROLL_NOT_CONFIRMED,
+    OVERLAY_INTERFERENCE,
+    CANCELLED,
+    UNKNOWN
+}
+
 enum class VisualizationActionState {
     OBSERVING,
     TARGET_FOUND,
@@ -86,6 +271,7 @@ enum class ActionType {
     WAIT_FOR_TEXT,
     CLICK_TEXT,
     LONG_CLICK,
+    FOCUS,
     TYPE_TEXT,
     CLEAR_TEXT,
     SCROLL,

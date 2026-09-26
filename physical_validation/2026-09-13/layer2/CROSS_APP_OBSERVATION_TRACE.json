@@ -1,0 +1,17 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "creatorActivityForeground": false,
+  "foregroundPackage": "com.android.chrome",
+  "serviceConnected": true,
+  "eventCount": 15,
+  "rootAvailable": true,
+  "nodeCount": 54,
+  "textNodeCount": 22,
+  "clickableCount": 12,
+  "editableCount": 1,
+  "scrollableCount": 3,
+  "observationTimestamp": 1789320000000,
+  "overlayVisible": true
+}

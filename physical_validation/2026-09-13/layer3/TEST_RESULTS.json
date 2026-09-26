@@ -1,0 +1,42 @@
+[
+  {
+    "testId": "L3-01",
+    "testName": "YouTube Search Target Discovery",
+    "category": "READ_ONLY_TARGET_DISCOVERY",
+    "status": "PASS",
+    "request": "Search",
+    "candidates": 1,
+    "actionDispatched": false,
+    "bounds": "[540,80][640,140]"
+  },
+  {
+    "testId": "L3-02",
+    "testName": "Chrome Known View Target Discovery",
+    "category": "READ_ONLY_TARGET_DISCOVERY",
+    "status": "PASS",
+    "request": "com.android.chrome:id/url_bar",
+    "candidates": 1,
+    "actionDispatched": false,
+    "bounds": "[20,80][700,160]"
+  },
+  {
+    "testId": "L3-03",
+    "testName": "Non-Existent Target Request",
+    "category": "READ_ONLY_TARGET_DISCOVERY",
+    "status": "PASS",
+    "request": "NonExistentElement",
+    "candidates": 0,
+    "actionDispatched": false,
+    "bounds": null
+  },
+  {
+    "testId": "L3-04",
+    "testName": "Ambiguous Duplicate Target Discovery",
+    "category": "READ_ONLY_TARGET_DISCOVERY",
+    "status": "PASS",
+    "request": "DuplicateText",
+    "candidates": 2,
+    "isAmbiguous": true,
+    "actionDispatched": false
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "device": "TECNO IN6",
+  "androidVersion": "8.1.0",
+  "apiLevel": 27,
+  "layer2StabilizationState": {
+    "overlayFeedbackLoopEliminated": true,
+    "overlayUpdateThrottleMs": 300,
+    "unintendedActionDispatchCount": 0,
+    "screenMovementJitter": "ELIMINATED"
+  }
+}
