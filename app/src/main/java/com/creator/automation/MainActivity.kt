@@ -430,6 +430,8 @@ fun DiagnosticControlCenter(context: Context) {
     val scanner = remember { DeviceCapabilityScanner(context) }
     var deviceProfile by remember { mutableStateOf(scanner.scanDeviceProfile()) }
 
+    val autoEngine = remember { AutonomousValidationEngine.getOrCreateInstance(context) }
+    val autoProgress by AutonomousValidationEngine.progress.collectAsState()
     val testRunner = remember { PhysicalTestRunner(context) }
     var testResults by remember { mutableStateOf<List<TestResult>>(emptyList()) }
     var isTestRunning by remember { mutableStateOf(false) }
@@ -943,7 +945,63 @@ fun TestsScreen(
     onRunAllSafeTests: () -> Unit,
     onRunFailedTests: () -> Unit
 ) {
+    val autoProgress by AutonomousValidationEngine.progress.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+
     Column {
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8EAF6))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AUTONOMOUS ON-DEVICE VALIDATION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = Color(0xFF1A237E)
+                    )
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    if (autoProgress.isRunning) {
+                        Button(
+                            onClick = {
+                                AutonomousValidationEngine.getOrCreateInstance(context).stopValidation()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("STOP", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                val service = AutomationAccessibilityService.instance
+                                if (service != null) {
+                                    AutonomousValidationEngine.getOrCreateInstance(service.applicationContext).startAutonomousValidation(service)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text("START FULL TEST", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Current: ${autoProgress.currentTestName}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("Passed: ${autoProgress.passCount} | Failed: ${autoProgress.failCount} | Blocked: ${autoProgress.blockedCount}", fontSize = 10.sp)
+                if (autoProgress.lastSummaryReportPath != null) {
+                    Text("Report: ${autoProgress.lastSummaryReportPath}", fontSize = 9.sp, color = Color(0xFF283593))
+                }
+            }
+        }
+
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onRunAllSafeTests, enabled = !isTestRunning, modifier = Modifier.weight(1f)) {
                 Text("Run Safe Physical Tests", fontSize = 11.sp)

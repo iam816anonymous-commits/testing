@@ -285,6 +285,41 @@ class AutomationAccessibilityService : AccessibilityService() {
         val menuView = LayerValidationController.currentMenuView.value
         val retained = LayerValidationController.retainedTarget.value
         val trace = LayerValidationController.lastValidationTrace.value
+        val autoProgress = AutonomousValidationEngine.progress.value
+
+        // Show compact autonomous progress banner if autonomous validation is running
+        if (autoProgress.isRunning) {
+            val autoBanner = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.argb(255, 26, 35, 126))
+                setPadding(10, 8, 10, 8)
+            }
+            val titleTv = TextView(this).apply {
+                setTextColor(Color.WHITE)
+                textSize = 9.5f
+                text = "FULL VALIDATION\n${autoProgress.currentTestName}"
+            }
+            val statsTv = TextView(this).apply {
+                setTextColor(Color.GREEN)
+                textSize = 9f
+                text = "Passed: ${autoProgress.passCount} | Failed: ${autoProgress.failCount} | Blocked: ${autoProgress.blockedCount}"
+            }
+            val stopBtn = android.widget.Button(this).apply {
+                text = "STOP"
+                textSize = 8.5f
+                setBackgroundColor(Color.RED)
+                setTextColor(Color.WHITE)
+                setOnClickListener {
+                    AutonomousValidationEngine.getOrCreateInstance(applicationContext).stopValidation()
+                    renderOverlayContent()
+                }
+            }
+            autoBanner.addView(titleTv)
+            autoBanner.addView(statsTv)
+            autoBanner.addView(stopBtn)
+            container.addView(autoBanner)
+            return
+        }
 
         if (!expanded) {
             val targetStatusStr = when {
